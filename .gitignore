@@ -1,0 +1,28 @@
+# Contenido del manual (no se versiona en este repo; solo código)
+manual-fuente/
+
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+
+# Dependencias y builds
+node_modules/
+vendor/
+dist/
+
+# Herramientas
+.superpowers/
+.idea/
+.vscode/
+
+# LaTeX y respaldos de editores
+*.aux
+*.log
+*~
+.*.un~
+
+# Sistema operativo
+Thumbs.db
+desktop.ini
+.DS_Store
