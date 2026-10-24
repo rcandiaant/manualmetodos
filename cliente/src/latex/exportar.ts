@@ -168,10 +168,17 @@ function lista(b: DocJSON, nivel: number): string {
   return [`${tabs(nivel)}\\begin{${env}}`, ...items, `${tabs(nivel)}\\end{${env}}`].join('\n');
 }
 
+/**
+ * I2: tras `\item` o tras el `\\` de la fila anterior, un `[` inicial se leería
+ * como argumento opcional (`\item[…]`, `\\[dim]`). Se protege como `{[}`, que
+ * el importador lee de vuelta como `[` en esas mismas posiciones.
+ */
+const protegerCorchete = (latex: string) => (latex.startsWith('[') ? `{[}${latex.slice(1)}` : latex);
+
 function item(it: DocJSON, nivel: number): string {
   const [primero, ...resto] = it.content ?? [];
   let s = `${tabs(nivel)}\\item`;
-  const texto = primero ? inline(primero.content ?? [], nivel) : '';
+  const texto = primero ? protegerCorchete(inline(primero.content ?? [], nivel)) : '';
   if (texto) s += ` ${texto}`;
   const etiqueta = it.attrs?.etiqueta;
   if (etiqueta) s += ` \\label{${etiqueta}}`;
@@ -187,7 +194,7 @@ function tabla(b: DocJSON, nivel: number): string {
   const filas = (b.content ?? []).map(
     (f) =>
       tabs(nivel + 1) +
-      (f.content ?? []).map((c) => inline(c.content ?? [], nivel + 1)).join(' & ') +
+      protegerCorchete((f.content ?? []).map((c) => inline(c.content ?? [], nivel + 1)).join(' & ')) +
       ' \\\\',
   );
   const ind = tabs(nivel);

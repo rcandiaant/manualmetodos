@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Control de cambios — demo</title>
+  </head>
+  <body>
+    <header class="cabecera">
+      <div class="marca-app">
+        <h1>Manual de métodos</h1>
+        <span class="subtitulo">Demo de control de cambios · Fase 0</span>
+      </div>
+      <div class="controles">
+        <label class="cargar">
+          <span>Cargar capítulo (.tex)</span>
+          <input id="archivo" type="file" accept=".tex" />
+        </label>
+        <span id="nombre-archivo" class="nombre-archivo"></span>
+        <fieldset class="selector" id="selector-modo">
+          <legend class="oculto">Modo</legend>
+          <label><input type="radio" name="modo" value="laboratorio" checked /> Laboratorio</label>
+          <label><input type="radio" name="modo" value="revisor" /> Revisor</label>
+        </fieldset>
+        <label class="selector-lab" id="selector-lab">
+          <span class="oculto">Laboratorio</span>
+          <select id="lab">
+            <option value="labA">Laboratorio A</option>
+            <option value="labB">Laboratorio B</option>
+          </select>
+        </label>
+      </div>
+    </header>
+    <div id="aviso-almacen" class="aviso" hidden></div>
+    <div id="error-carga" class="error" role="alert" hidden></div>
+    <details id="avisos" class="avisos" hidden>
+      <summary></summary>
+      <ul></ul>
+    </details>
+    <main id="contenido"></main>
+    <script type="module" src="/src/demo/main.ts"></script>
+  </body>
+</html>

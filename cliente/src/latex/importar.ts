@@ -63,6 +63,22 @@ function recortar(nodos: Ast.Node[]): Ast.Node[] {
   return nodos.slice(i, j);
 }
 
+/**
+ * I2: el exportador protege un `[` al inicio del texto de un `\item` o de una
+ * fila de tabla como `{[}`; aquí se lee de vuelta como el texto `[` (solo en
+ * esas posiciones, para que la ida y vuelta del JSON sea exacta).
+ */
+function leerCorchete(nodos: Ast.Node[]): Ast.Node[] {
+  const i = nodos.findIndex((n) => !esBlanco(n));
+  const g = nodos[i];
+  if (g?.type !== 'group' || g.content.length !== 1) return nodos;
+  const [h] = g.content;
+  if (h.type !== 'string' || h.content !== '[') return nodos;
+  const copia = [...nodos];
+  copia[i] = { type: 'string', content: '[', position: g.position };
+  return copia;
+}
+
 class Importador {
   readonly ctx: CtxImport;
 
@@ -165,7 +181,7 @@ class Importador {
     return {
       type: 'item',
       attrs: { etiqueta },
-      content: this.bloques(cuerpo, true),
+      content: this.bloques(leerCorchete(cuerpo), true),
     };
   }
 
@@ -225,9 +241,10 @@ class Importador {
       attrs: { columnas },
       content: filas.map((f) => ({
         type: 'filaTabla',
-        content: f.map((c) => {
+        content: f.map((c, k) => {
           const bid = this.ctx.siguienteBid();
-          return { type: 'celda', attrs: { bid }, content: convertirInline(recortar(c), this.ctx) };
+          const nodos = k === 0 ? leerCorchete(recortar(c)) : recortar(c);
+          return { type: 'celda', attrs: { bid }, content: convertirInline(nodos, this.ctx) };
         }),
       })),
     };

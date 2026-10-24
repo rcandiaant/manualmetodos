@@ -20,8 +20,8 @@ const BLOQUES_CON_BID = new Set([
   ...Object.keys(BIDS_CABECERA),
 ]);
 
-const esBloque = (n: DocJSON): boolean => BLOQUES_CON_BID.has(n.type ?? '');
-const bidDe = (n: DocJSON): string | null => {
+export const esBloque = (n: DocJSON): boolean => BLOQUES_CON_BID.has(n.type ?? '');
+export const bidDe = (n: DocJSON): string | null => {
   const fijo = BIDS_CABECERA[n.type ?? ''];
   if (fijo) return fijo;
   const b = n.attrs?.bid;

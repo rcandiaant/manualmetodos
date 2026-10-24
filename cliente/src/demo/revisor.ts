@@ -1,0 +1,275 @@
+import { Editor } from '@tiptap/core';
+import { aplicarSugerencias } from '../cambios/aplicar';
+import { detectarConflictos, type Conflicto } from '../cambios/conflictos';
+import { detectarCambiosEstructura } from '../cambios/estructura';
+import { ANCLA_INICIO, calcularSugerencias, listarBloques } from '../cambios/sugerencias';
+import { validarDocumento } from '../esquema/esquema';
+import { exportarLatex } from '../latex/exportar';
+import type { DocJSON, Sugerencia } from '../tipos';
+import { LABS, LETRA_LAB, NOMBRE_LAB, type ContextoModo, type Decision, type Lab, type Modo } from './almacen';
+import { claveDecoraciones, decoracionesRevisor } from './decoraciones';
+import { extensionesDemo } from './editor';
+import { NOMBRE_TIPO, boton, cajaAvisosEstructura, cajaError, el, mensajeDe, resaltar, resumenCambio } from './ui';
+
+const esLab = (autor: string): autor is Lab => (LABS as string[]).includes(autor);
+const claseAutor = (autor: string) => `autor-${autor}`;
+
+/** Tarjeta de una sugerencia suelta o grupo de sugerencias en conflicto. */
+type Entrada = { tipo: 'suelta'; s: Sugerencia } | { tipo: 'conflicto'; c: Conflicto; sugs: Sugerencia[] };
+
+/**
+ * Modo revisor: la base (solo lectura) con las sugerencias de todos los laboratorios
+ * superpuestas por color, conflictos recuadrados en naranjo, tarjetas para decidir y
+ * exportación del .tex final.
+ */
+export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo {
+  const { estado } = ctx;
+  const base = estado.base as DocJSON;
+  const decisiones = estado.decisiones;
+
+  const error = el('div', { class: 'error', role: 'alert' });
+  error.hidden = true;
+  const resumen = el('span', { class: 'contador', 'aria-live': 'polite' });
+  const areaEditor = el('div', { class: 'editor', 'data-modo': 'revisor' });
+  const lista = el('ol', { class: 'tarjetas' });
+
+  // Decisiones borradas porque un laboratorio guardó otra copia: se avisa una vez.
+  const descartadas = LABS.filter((l) => (estado.decisionesDescartadas[l] ?? 0) > 0);
+  const avisoDescartadas = el(
+    'div',
+    { class: 'aviso', role: 'status' },
+    ...descartadas.map((l) => {
+      const n = estado.decisionesDescartadas[l] ?? 0;
+      return el(
+        'p',
+        {},
+        `Se borr${n === 1 ? 'ó 1 decisión' : `aron ${n} decisiones`} sobre el ${NOMBRE_LAB[l]} porque guardó una nueva copia; revise de nuevo sus sugerencias.`,
+      );
+    }),
+  );
+  avisoDescartadas.hidden = descartadas.length === 0;
+  if (descartadas.length > 0) {
+    estado.decisionesDescartadas = {};
+    ctx.guardar();
+  }
+
+  // I1: cambios de estructura de cada laboratorio que no se recogen como sugerencia.
+  const avisosEstructura = el('div', { class: 'aviso aviso-estructura', role: 'status' });
+  avisosEstructura.hidden = true;
+
+  // Sugerencias de cada laboratorio que guardó copia, con sus motivos.
+  let sugerencias: Sugerencia[] = [];
+  let conflictos: Conflicto[] = [];
+  const avisosPorLab: string[] = [];
+  try {
+    for (const lab of LABS) {
+      const copia = estado.copias[lab];
+      if (!copia) continue;
+      for (const a of detectarCambiosEstructura(base, copia)) avisosPorLab.push(`${NOMBRE_LAB[lab]}: ${a}`);
+      for (const s of calcularSugerencias(base, copia, lab)) {
+        const motivo = estado.motivos[lab][s.id];
+        sugerencias.push(motivo ? { ...s, motivo } : s);
+      }
+    }
+    conflictos = detectarConflictos(sugerencias);
+    cajaAvisosEstructura(
+      avisosEstructura,
+      avisosPorLab,
+      'Cambios de estructura de los laboratorios que NO se aplicarán (unir ítems, mover o reordenar bloques). ' +
+        'Si corresponde, rehágalos a mano en el .tex exportado o pida al laboratorio que los proponga como eliminación + bloque nuevo:',
+    );
+  } catch (e) {
+    sugerencias = [];
+    cajaError(error, `no se pudieron calcular las sugerencias: ${mensajeDe(e)}`);
+  }
+
+  // Orden de documento: índice del bloque en la base (las inserciones van tras su ancla).
+  const indice = new Map(listarBloques(base).map((b, i) => [b.bid, i] as const));
+  const clave = (s: Sugerencia): number =>
+    (s.bloqueId === ANCLA_INICIO ? -1 : (indice.get(s.bloqueId) ?? 0)) * 1e6 +
+    (s.tipo === 'bloque-insertado' ? 5e5 : s.base.desde);
+  sugerencias.sort((a, b) => clave(a) - clave(b));
+
+  const enConflicto = new Map<string, Conflicto>();
+  for (const c of conflictos) for (const id of c.ids) enConflicto.set(id, c);
+  const entradas: Entrada[] = [];
+  const vistos = new Set<Conflicto>();
+  for (const s of sugerencias) {
+    const c = enConflicto.get(s.id);
+    if (!c) entradas.push({ tipo: 'suelta', s });
+    else if (!vistos.has(c)) {
+      vistos.add(c);
+      entradas.push({ tipo: 'conflicto', c, sugs: sugerencias.filter((x) => c.ids.includes(x.id)) });
+    }
+  }
+
+  const editor = new Editor({
+    element: areaEditor,
+    extensions: extensionesDemo(),
+    content: structuredClone(base),
+    editable: false,
+  });
+
+  const decidir = (cambios: [string, Decision | undefined][]) => {
+    for (const [id, d] of cambios) {
+      if (d) decisiones[id] = d;
+      else delete decisiones[id];
+    }
+    ctx.guardar();
+    redibujar();
+  };
+
+  function chipAutor(autor: string): HTMLElement {
+    return el(
+      'span',
+      { class: `chip-autor ${claseAutor(autor)}`, title: esLab(autor) ? NOMBRE_LAB[autor] : autor },
+      esLab(autor) ? LETRA_LAB[autor] : autor,
+    );
+  }
+
+  function detalle(s: Sugerencia): HTMLElement {
+    return el(
+      'div',
+      { class: `detalle ${claseAutor(s.autor)}`, 'data-sug': s.id },
+      el('div', { class: 'tarjeta-cabeza' }, chipAutor(s.autor), el('span', { class: 'etiqueta-tipo' }, NOMBRE_TIPO[s.tipo])),
+      resumenCambio(s),
+      s.motivo ? el('p', { class: 'motivo-leido' }, `Motivo: ${s.motivo}`) : null,
+    );
+  }
+
+  function botonDecision(texto: string, activo: boolean, accion: () => void, clase: string): HTMLButtonElement {
+    const b = boton(texto, accion, `decision ${clase}`);
+    b.setAttribute('aria-pressed', String(activo));
+    return b;
+  }
+
+  function tarjeta(e: Entrada): HTMLLIElement {
+    if (e.tipo === 'suelta') {
+      const { s } = e;
+      const d = decisiones[s.id];
+      const alternar = (v: Decision) => decidir([[s.id, d === v ? undefined : v]]);
+      return el(
+        'li',
+        { class: `tarjeta ${d ? `decision-${d}` : ''}` },
+        detalle(s),
+        el(
+          'div',
+          { class: 'botones' },
+          botonDecision('Aceptar', d === 'aceptada', () => alternar('aceptada'), 'aceptar'),
+          botonDecision('Rechazar', d === 'rechazada', () => alternar('rechazada'), 'rechazar'),
+        ),
+      );
+    }
+    const { sugs } = e;
+    const autores = [...new Set(sugs.map((s) => s.autor))];
+    const elegido = (autor: string | null) =>
+      sugs.every((s) => decisiones[s.id] === (s.autor === autor ? 'aceptada' : 'rechazada'));
+    const elegir = (autor: string | null) =>
+      decidir(sugs.map((s) => [s.id, s.autor === autor ? 'aceptada' : 'rechazada'] as [string, Decision]));
+    const resuelto = autores.some((a) => elegido(a)) || elegido(null);
+    return el(
+      'li',
+      { class: `tarjeta conflicto ${resuelto ? 'resuelto' : ''}` },
+      el('div', { class: 'titulo-conflicto' }, resuelto ? 'Conflicto resuelto' : 'Conflicto: elija una propuesta'),
+      ...sugs.map(detalle),
+      el(
+        'div',
+        { class: 'botones' },
+        ...autores.map((a) =>
+          botonDecision(`Elegir ${esLab(a) ? LETRA_LAB[a] : a}`, elegido(a), () => elegir(a), `elegir ${claseAutor(a)}`),
+        ),
+        botonDecision('Ninguna', elegido(null), () => elegir(null), 'rechazar'),
+      ),
+    );
+  }
+
+  function redibujar(): void {
+    try {
+      const set = decoracionesRevisor(editor.state.doc, sugerencias, {
+        conflictos,
+        claseAutor,
+        decision: (id) => decisiones[id],
+      });
+      editor.view.dispatch(editor.state.tr.setMeta(claveDecoraciones, set));
+    } catch (e) {
+      cajaError(error, `no se pudieron dibujar las sugerencias: ${mensajeDe(e)}`);
+    }
+    lista.replaceChildren(...entradas.map(tarjeta));
+    if (entradas.length === 0) {
+      lista.append(
+        el('li', { class: 'vacio' }, 'No hay sugerencias. Los laboratorios deben editar su copia y pulsar «Guardar copia».'),
+      );
+    }
+    const aceptadas = sugerencias.filter((s) => decisiones[s.id] === 'aceptada').length;
+    const pendientes = sugerencias.filter((s) => !decisiones[s.id]).length;
+    resumen.textContent =
+      `${sugerencias.length} sugerencias · ${aceptadas} aceptadas · ${pendientes} sin decidir · ` +
+      `${conflictos.length} conflicto${conflictos.length === 1 ? '' : 's'}`;
+  }
+
+  function exportar(): void {
+    const aceptadas = sugerencias.filter((s) => decisiones[s.id] === 'aceptada');
+    try {
+      const final = aplicarSugerencias(base, aceptadas);
+      const v = validarDocumento(final);
+      if (!v.ok) throw new Error(`el documento resultante no es válido: ${v.error}`);
+      const tex = exportarLatex(final);
+      const nombre = (estado.archivo ?? 'capitulo.tex').replace(/\.tex$/i, '') + '-revisado.tex';
+      const url = URL.createObjectURL(new Blob([tex], { type: 'text/x-tex;charset=utf-8' }));
+      const a = el('a', { href: url, download: nombre });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      cajaError(error, null);
+    } catch (e) {
+      cajaError(error, `no se pudo exportar: ${mensajeDe(e)}`);
+    }
+  }
+
+  // Clic en una marca del texto → su tarjeta.
+  areaEditor.addEventListener('click', (ev) => {
+    const marca = (ev.target as HTMLElement).closest<HTMLElement>('[data-sug]');
+    if (marca?.dataset.sug) resaltar(lista, marca.dataset.sug);
+  });
+  // Clic en una tarjeta → su marca en el texto.
+  lista.addEventListener('click', (ev) => {
+    const t = ev.target as HTMLElement;
+    if (t.closest('button')) return;
+    const id = t.closest<HTMLElement>('[data-sug]')?.dataset.sug;
+    if (id) resaltar(areaEditor, id);
+  });
+
+  const leyenda = el(
+    'div',
+    { class: 'leyenda' },
+    ...LABS.filter((l) => estado.copias[l]).map((l) => el('span', {}, chipAutor(l), ` ${NOMBRE_LAB[l]}`)),
+    el('span', { class: 'leyenda-conflicto' }, 'Conflicto'),
+  );
+
+  contenedor.replaceChildren(
+    el(
+      'div',
+      { class: 'modo modo-revisor' },
+      el(
+        'section',
+        { class: 'columna-editor', 'aria-label': 'Base con sugerencias' },
+        el(
+          'div',
+          { class: 'barra-superior' },
+          leyenda,
+          el('div', { class: 'acciones' }, boton('Exportar .tex final', exportar, 'primario')),
+        ),
+        el('p', { class: 'nota' }, 'Solo se aplican las sugerencias aceptadas; las que no tienen decisión se descartan.'),
+        avisoDescartadas,
+        avisosEstructura,
+        error,
+        areaEditor,
+      ),
+      el('aside', { class: 'panel', 'aria-label': 'Decisiones' }, el('h2', {}, 'Sugerencias '), resumen, lista),
+    ),
+  );
+  redibujar();
+
+  return { destruir: () => editor.destroy() };
+}

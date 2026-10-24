@@ -76,6 +76,22 @@ describe('esquema del manual', () => {
     ]);
   });
 
+  it('M1: subíndice y superíndice se excluyen mutuamente', () => {
+    const { subindice, superindice, negrita } = esquemaManual.marks;
+    expect(subindice.excludes(superindice)).toBe(true);
+    expect(superindice.excludes(subindice)).toBe(true);
+    expect(subindice.excludes(negrita)).toBe(false);
+    // Agregar superíndice a un texto con subíndice reemplaza la marca.
+    const marcas = superindice.create().addToSet([subindice.create(), negrita.create()]);
+    expect(marcas.map((m) => m.type.name).sort()).toEqual(['negrita', 'superindice']);
+    // Un JSON con ambas marcas no es válido.
+    const d = doc({
+      type: 'parrafo',
+      content: [{ type: 'text', text: 'x', marks: [{ type: 'subindice' }, { type: 'superindice' }] }],
+    });
+    expect(validarDocumento(d).ok).toBe(false);
+  });
+
   it('rechaza notaPie con bloques invalidos', () => {
     const d = doc({
       type: 'parrafo',

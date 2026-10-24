@@ -1,3 +1,5 @@
+import type { ContentMatch, NodeType } from '@tiptap/pm/model';
+import { esquemaManual } from '../esquema/esquema';
 import type { DocJSON, Sugerencia } from '../tipos';
 import { detectarConflictos } from './conflictos';
 import { ANCLA_INICIO } from './sugerencias';
@@ -6,32 +8,6 @@ import { BLOQUES_ATOMICOS, jsonEstable, tokenizarBloque, tokensANodos } from './
 /** Pseudo-bloques de la cabecera: se localizan por tipo, no por attr `bid`. */
 const TIPO_CABECERA: Record<string, string> = { '@analito': 'analito', '@metodo': 'metodo' };
 const TIPOS_CABECERA = new Set(Object.values(TIPO_CABECERA));
-
-/** Grupo `bloque` del esquema (doc: `analito metodo bloque*`). */
-const GRUPO_BLOQUE = new Set([
-  'seccion',
-  'parrafo',
-  'listaOrdenada',
-  'listaVinetas',
-  'tabla',
-  'ecuacion',
-  'especial',
-]);
-
-/**
- * Qué tipos de hijo admite cada contenedor (copia local de las reglas `content` del
- * esquema; el esquema no está disponible en esta rama). `item` es `parrafo bloque*`:
- * una inserción nunca va en la posición 0 (siempre va tras un ancla), así que basta
- * con el grupo `bloque`.
- */
-const HIJOS_ADMITIDOS: Record<string, Set<string>> = {
-  doc: GRUPO_BLOQUE,
-  listaOrdenada: new Set(['item']),
-  listaVinetas: new Set(['item']),
-  item: GRUPO_BLOQUE,
-  tabla: new Set(['filaTabla']),
-  filaTabla: new Set(['celda']),
-};
 
 interface Eslabon {
   nodo: DocJSON;
@@ -122,8 +98,48 @@ function numeroInsercion(s: Sugerencia): number {
   return Number(m[1]);
 }
 
-const admite = (padre: DocJSON, tipo: string): boolean =>
-  HIJOS_ADMITIDOS[padre.type ?? '']?.has(tipo) ?? false;
+/** Estado del autómata `content` de `tipoPadre` tras consumir `tipos`, o null si no encaja. */
+function recorrer(tipoPadre: NodeType, tipos: string[]): ContentMatch | null {
+  let m: ContentMatch | null = tipoPadre.contentMatch;
+  for (const t of tipos) {
+    const tipoHijo = esquemaManual.nodes[t];
+    m = tipoHijo && m ? m.matchType(tipoHijo) : null;
+    if (!m) return null;
+  }
+  return m;
+}
+
+/** true si `tipo` etiqueta alguna transición alcanzable del autómata `content`. */
+function apareceEnContenido(tipoPadre: NodeType, tipo: string): boolean {
+  const vistos = new Set<ContentMatch>();
+  const pendientes = [tipoPadre.contentMatch];
+  while (pendientes.length > 0) {
+    const m = pendientes.pop() as ContentMatch;
+    if (vistos.has(m)) continue;
+    vistos.add(m);
+    for (let i = 0; i < m.edgeCount; i++) {
+      const { type, next } = m.edge(i);
+      if (type.name === tipo) return true;
+      pendientes.push(next);
+    }
+  }
+  return false;
+}
+
+/**
+ * true si `padre` admite un hijo de tipo `tipo` en la posición `indice + 1`, según las
+ * reglas `content` de `esquemaManual`: el contenido resultante debe seguir siendo válido.
+ * Si el contenido actual de `padre` ya no cumple el esquema (p. ej. un doc sin cabecera),
+ * basta con que el tipo figure en su expresión `content`.
+ */
+function admite(padre: DocJSON, indice: number, tipo: string): boolean {
+  const tipoPadre = esquemaManual.nodes[padre.type ?? ''];
+  if (!tipoPadre || !esquemaManual.nodes[tipo]) return false;
+  const tipos = (padre.content ?? []).map((h) => h.type ?? '');
+  if (!recorrer(tipoPadre, tipos)?.validEnd) return apareceEnContenido(tipoPadre, tipo);
+  tipos.splice(indice + 1, 0, tipo);
+  return recorrer(tipoPadre, tipos)?.validEnd ?? false;
+}
 
 /**
  * Inserta los bloques nuevos de un ancla en orden ascendente de `n` (R8). Cada uno se
@@ -151,7 +167,7 @@ function insertarEnAncla(raiz: DocJSON, ancla: string, sugs: Sugerencia[]): void
       cadena = buscarBloque(raiz, ancla);
     }
     const valido = ({ padre, indice }: Eslabon) =>
-      admite(padre, tipo) && (padre !== raiz || indice + 1 >= numCabecera(raiz));
+      admite(padre, indice, tipo) && (padre !== raiz || indice + 1 >= numCabecera(raiz));
     const eslabones = cadena ?? [];
     let destino: Eslabon | undefined;
     if (s.profundidad !== undefined) {

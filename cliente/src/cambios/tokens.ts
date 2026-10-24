@@ -39,7 +39,9 @@ function claveAtomo(nodo: DocJSON, excluir: string[] = []): string {
 
 export function tokenizarBloque(bloque: DocJSON): Token[] {
   if (BLOQUES_ATOMICOS.has(bloque.type ?? '')) {
-    return [{ clave: claveAtomo(bloque, ['bid']), texto: '', marcas: [], nodo: bloque }];
+    // `bid` (identidad) y `pegado` (disposición respecto del hermano anterior) no son
+    // contenido: excluirlos evita diferencias fantasma entre JSON con y sin attrs por defecto.
+    return [{ clave: claveAtomo(bloque, ['bid', 'pegado']), texto: '', marcas: [], nodo: bloque }];
   }
   const tokens: Token[] = [];
   // Texto adyacente con las mismas marcas se une antes de partir en tokens, para que

@@ -168,6 +168,59 @@ describe('exportarLatex — ida y vuelta', () => {
     expect(tex).toContain('NH$_4^+$ y x$_{12}$');
   });
 
+  describe('I2: `[` al inicio de un \\item o de una fila de tabla', () => {
+    const t = (text: string): DocJSON => ({ type: 'text', text });
+    const p = (bid: string, text: string): DocJSON => ({ type: 'parrafo', attrs: { bid }, content: [t(text)] });
+    const celda = (bid: string, text: string): DocJSON => ({ type: 'celda', attrs: { bid }, content: [t(text)] });
+    const fila = (...celdas: DocJSON[]): DocJSON => ({ type: 'filaTabla', content: celdas });
+    const docItem = cab([
+      {
+        type: 'listaOrdenada',
+        content: [
+          { type: 'item', attrs: { etiqueta: null }, content: [p('b1', 'uno')] },
+          { type: 'item', attrs: { etiqueta: null }, content: [p('b2', '[H+] dos [x]')] },
+        ],
+      },
+    ]);
+    const docTabla = cab([
+      {
+        type: 'tabla',
+        attrs: { columnas: 'll' },
+        content: [fila(celda('b1', '[a]'), celda('b2', 'b')), fila(celda('b3', '[c]'), celda('b4', '[d]'))],
+      },
+    ]);
+
+    it('exporta {[} en esas posiciones y nada más', () => {
+      expect(exportarLatex(docItem)).toContain('\\item {[}H+] dos [x]\n');
+      const tex = exportarLatex(docTabla);
+      expect(tex).toContain('\t{[}a] & b \\\\\n\t{[}c] & [d] \\\\\n');
+    });
+
+    it.each([
+      ['ítem', docItem],
+      ['tabla', docTabla],
+    ])('ida y vuelta JSON y LaTeX: %s', (_n, d) => {
+      const tex = exportarLatex(d);
+      const vuelta = importarLatex(tex);
+      expect(vuelta.avisos).toEqual([]);
+      expect(vuelta.doc).toEqual(d);
+      const otra = exportarLatex(vuelta.doc);
+      expect(otra).toBe(tex);
+      expect(compararLatex(tex, otra).igual).toBe(true);
+    });
+
+    it('el importador lee {[} como [ en esas posiciones', () => {
+      const tex =
+        '\\analito{A}\n\n\\metodo{M}\n\n\\begin{itemize}\n\t\\item {[}NH4+] x\n\\end{itemize}\n\n' +
+        '\\begin{tabular}{l}\n\t{[}c] \\\\\n\\end{tabular}\n';
+      const { doc: d, avisos } = importarLatex(tex);
+      expect(avisos).toEqual([]);
+      expect(d.content![2].content![0].content![0].content).toEqual([t('[NH4+] x')]);
+      expect(d.content![3].content![0].content![0].content).toEqual([t('[c]')]);
+      expect(compararLatex(tex, exportarLatex(d)).igual).toBe(true);
+    });
+  });
+
   it('emite el estilo del manual', () => {
     const tex = exportarLatex(importarLatex(crlf(inline)).doc);
     expect(tex.startsWith('\\analito{Ejemplo}\n\n\\metodo{MÉTODO SINTÉTICO DE PRUEBA}\n')).toBe(true);

@@ -152,9 +152,11 @@ const EspecialInline = Node.create({
   ...htmlAtomo('especialInline', (a) => a.latex),
 });
 
-const marca = (name: string, tag: string) =>
+/** `excludes` de ProseMirror: por defecto cada marca solo se excluye a sí misma. */
+const marca = (name: string, tag: string, excludes?: string) =>
   Mark.create({
     name,
+    ...(excludes ? { excludes } : {}),
     parseHTML: () => [{ tag: `${tag}[data-tipo="${name}"]` }],
     renderHTML: ({ HTMLAttributes }) => [tag, { ...HTMLAttributes, 'data-tipo': name }, 0],
   });
@@ -180,6 +182,7 @@ export const extensionesManual: Extensions = [
   EspecialInline,
   marca('negrita', 'strong'),
   marca('cursiva', 'em'),
-  marca('subindice', 'sub'),
-  marca('superindice', 'sup'),
+  // M1: un texto no puede ser subíndice y superíndice a la vez (la exportación perdería uno).
+  marca('subindice', 'sub', 'subindice superindice'),
+  marca('superindice', 'sup', 'subindice superindice'),
 ];
