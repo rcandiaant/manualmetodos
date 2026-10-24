@@ -13,7 +13,9 @@
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-text": "^3.32.0",
     "@tiptap/pm": "^3.32.0",
+    "@unified-latex/unified-latex-types": "^1.8.4",
     "@unified-latex/unified-latex-util-parse": "^1.8.4",
+    "@unified-latex/unified-latex-util-print-raw": "^1.8.4",
     "diff": "^9.0.0",
     "katex": "^0.19.0"
   },
