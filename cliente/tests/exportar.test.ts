@@ -205,6 +205,13 @@ describe('normalizarLatex', () => {
     for (const [a, b] of pares) expect(compararLatex(a, b).igual, a).toBe(true);
   });
 
+  it('R23: un comentario seguido de línea en blanco no esconde el fin de párrafo', () => {
+    expect(compararLatex('Uno. % c\n\nDos.', 'Uno. Dos.').igual).toBe(false);
+    const tex = '\\analito{A}\n\n\\metodo{M}\n\nUno. % c\n\nDos.\n';
+    expect(compararLatex(tex, exportarLatex(importarLatex(tex).doc)).igual).toBe(true);
+    expect(compararLatex('Uno. % c\n\nDos.', 'Uno.\n\nDos.').igual).toBe(true);
+  });
+
   it('R21: \\degree pegado a una letra no equivale a las formas válidas', () => {
     expect(compararLatex('30\\degreeC', '30\\degree C').igual).toBe(false);
     expect(compararLatex('30\\degree{}C', '30\\degree C').igual).toBe(true);

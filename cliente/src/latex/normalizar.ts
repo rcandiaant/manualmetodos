@@ -19,7 +19,13 @@ function quitarComentarios(tex: string): string {
     } else if (c === '%') {
       while (i < tex.length && tex[i] !== '\n') i++;
       i++;
-      while (i < tex.length && (tex[i] === ' ' || tex[i] === '\t')) i++;
+      let j = i;
+      while (j < tex.length && (tex[j] === ' ' || tex[j] === '\t')) j++;
+      // R23: si la línea siguiente está en blanco, el comentario no esconde el
+      // fin de párrafo: se conserva un salto para que la línea vacía cuente.
+      if (tex[j] === '\r') j++;
+      if (tex[j] === '\n') s += '\n';
+      else i = j;
     } else {
       s += c;
       i++;

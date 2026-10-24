@@ -1,0 +1,15 @@
+% Marco mínimo de prueba para compilar un capítulo suelto.
+% Sustituto hasta tener el marco real de Fabio (pendiente del spec §11).
+% Uso: pdflatex "\def\capitulo{nombre-sin-extension}\input{marco-prueba}"
+\documentclass{book}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath}
+\usepackage{gensymb}
+\usepackage{hyperref}
+\newcommand{\analito}[1]{\chapter{#1}}
+\newcommand{\metodo}[1]{\section*{#1}}
+\begin{document}
+\input{\capitulo}
+\end{document}
