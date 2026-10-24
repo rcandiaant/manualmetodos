@@ -2,7 +2,7 @@ import { parse } from '@unified-latex/unified-latex-util-parse';
 import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import type * as Ast from '@unified-latex/unified-latex-types';
 import type { DocJSON } from '../tipos';
-import { avisar, convertirInline, type CtxImport } from './inline';
+import { avisar, convertirInline, notaConvertible, type CtxImport } from './inline';
 
 export interface ResultadoImportacion {
   doc: DocJSON;
@@ -23,6 +23,26 @@ const LISTAS: Record<string, 'listaOrdenada' | 'listaVinetas'> = {
   enumerate: 'listaOrdenada',
   itemize: 'listaVinetas',
 };
+
+/** Macros de estructura de tabla sin representación en el esquema. */
+const ESTRUCTURA_TABLA = new Set([
+  'hline',
+  'cline',
+  'multicolumn',
+  'multirow',
+  'toprule',
+  'midrule',
+  'bottomrule',
+  'cmidrule',
+  'noalign',
+  'tabularnewline',
+  'newline',
+]);
+
+const esLista = (b: DocJSON | undefined) =>
+  b?.type === 'listaOrdenada' || b?.type === 'listaVinetas';
+
+const ultimo = <T>(xs: T[] | undefined): T | undefined => xs?.[xs.length - 1];
 
 const esMacro = (n: Ast.Node | undefined, nombre?: string): n is Ast.Macro =>
   n?.type === 'macro' && (nombre === undefined || n.content === nombre);
@@ -49,6 +69,7 @@ class Importador {
       avisos: [],
       siguienteBid: () => `b${++contador}`,
       crudo: (n) => this.crudo(n),
+      bloques: (nodos) => this.bloques(nodos),
     };
   }
 
@@ -145,6 +166,89 @@ class Importador {
     };
   }
 
+  /** `\[ … \]` → `ecuacion` con el LaTeX interior byte a byte, sin espacios en los bordes. */
+  private ecuacion(n: Ast.DisplayMath): DocJSON {
+    const crudo = this.crudo(n);
+    if (!crudo.startsWith('\\[') || !crudo.endsWith('\\]') || crudo.length < 4) {
+      return this.especial(n);
+    }
+    const latex = crudo.slice(2, -2).replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+    return { type: 'ecuacion', attrs: { latex, bid: this.ctx.siguienteBid() } };
+  }
+
+  /**
+   * `tabular` → `tabla`: filas separadas por `\\`, celdas por `&`; un `\\`
+   * final no crea fila vacía. Cualquier construcción de estructura de tabla
+   * (`\hline`, `\\[2pt]`, …) deja la tabla entera como `especial`.
+   */
+  private tabla(env: Ast.Environment): DocJSON {
+    const [pos, spec] = env.args ?? [];
+    if (!argVacio(pos) || !spec || spec.openMark !== '{' || spec.content.length === 0) {
+      return this.especial(env);
+    }
+    if (!spec.content.every((n) => n.type === 'string')) return this.especial(env);
+    const columnas = (spec.content as Ast.String[]).map((s) => s.content).join('');
+
+    const filas: Ast.Node[][][] = [];
+    let fila: Ast.Node[][] = [];
+    let celda: Ast.Node[] = [];
+    for (const n of env.content) {
+      // El parser entrega `\\` como macro de nombre `\`.
+      if (n.type === 'macro' && n.content === '\\') {
+        if (!(n.args ?? []).every(argVacio)) return this.especial(env);
+        fila.push(celda);
+        filas.push(fila);
+        fila = [];
+        celda = [];
+      } else if (n.type === 'string' && n.content === '&') {
+        fila.push(celda);
+        celda = [];
+      } else if (
+        n.type === 'parbreak' ||
+        (n.type === 'string' && n.content.includes('&')) ||
+        (n.type === 'macro' && ESTRUCTURA_TABLA.has(n.content))
+      ) {
+        return this.especial(env);
+      } else celda.push(n);
+    }
+    if (fila.length > 0 || recortar(celda).length > 0) {
+      fila.push(celda);
+      filas.push(fila);
+    }
+    if (filas.length === 0) return this.especial(env);
+
+    return {
+      type: 'tabla',
+      attrs: { columnas },
+      content: filas.map((f) => ({
+        type: 'filaTabla',
+        content: f.map((c) => {
+          const bid = this.ctx.siguienteBid();
+          return { type: 'celda', attrs: { bid }, content: convertirInline(recortar(c), this.ctx) };
+        }),
+      })),
+    };
+  }
+
+  /** Párrafo más profundo al final de un bloque (bajando por el último item de listas). */
+  private ultimoParrafo(b: DocJSON | undefined): DocJSON | undefined {
+    if (b?.type === 'parrafo') return b;
+    if (esLista(b)) return this.ultimoParrafo(ultimo(ultimo(b!.content)?.content));
+    return undefined;
+  }
+
+  /**
+   * `\footnote{…}` justo tras `\end{enumerate|itemize}` (fuera de un `\item`):
+   * se adjunta al final del párrafo más profundo del último item. Devuelve
+   * false si la lista no termina en un párrafo (la nota sigue el flujo normal).
+   */
+  private adjuntarNota(lista: DocJSON | undefined, nota: Ast.Macro): boolean {
+    const p = this.ultimoParrafo(lista);
+    if (!p || !notaConvertible(nota)) return false;
+    p.content = [...(p.content ?? []), ...convertirInline([nota], this.ctx)];
+    return true;
+  }
+
   /**
    * Convierte una secuencia de nodos en bloques. Las corridas inline se separan
    * en párrafos por `parbreak`. Con `exigirParrafo` (cuerpo de `item`) el
@@ -171,18 +275,28 @@ class Importador {
       empujarBloque(crear);
     };
 
+    // Tras una lista sólo han venido espacios: una `\footnote` se adjunta a ella.
+    let trasLista = false;
     for (const n of nodos) {
+      if (
+        trasLista &&
+        esMacro(n, 'footnote') &&
+        recortar(corrida).length === 0 &&
+        this.adjuntarNota(ultimo(salida), n)
+      ) {
+        continue;
+      }
+      if (n.type !== 'whitespace') trasLista = false;
       if (n.type === 'parbreak') cerrar();
       else if (n.type === 'macro' && n.content === 'section') bloque(() => this.seccion(n));
       else if (n.type === 'macro' && SECCIONAMIENTO_OTRO.has(n.content))
         bloque(() => this.especial(n));
-      else if (n.type === 'environment' && LISTAS[n.env]) bloque(() => this.lista(n, LISTAS[n.env]));
-      else if (
-        n.type === 'environment' ||
-        n.type === 'mathenv' ||
-        n.type === 'displaymath' ||
-        n.type === 'verbatim'
-      )
+      else if (n.type === 'environment' && LISTAS[n.env]) {
+        bloque(() => this.lista(n, LISTAS[n.env]));
+        trasLista = esLista(ultimo(salida));
+      } else if (n.type === 'environment' && n.env === 'tabular') bloque(() => this.tabla(n));
+      else if (n.type === 'displaymath') bloque(() => this.ecuacion(n));
+      else if (n.type === 'environment' || n.type === 'mathenv' || n.type === 'verbatim')
         bloque(() => this.especial(n));
       else corrida.push(n);
     }
