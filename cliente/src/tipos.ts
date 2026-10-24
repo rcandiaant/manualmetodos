@@ -20,5 +20,10 @@ export interface Sugerencia {
   original: DocJSON[];
   propuesta: DocJSON[];
   tipo: TipoSugerencia;
+  /**
+   * Solo en `bloque-insertado`: número de ancestros (sin contar `doc`) de
+   * `propuesta[0]` en la copia. Indica a qué nivel del ancla se inserta.
+   */
+  profundidad?: number;
   motivo?: string;
 }

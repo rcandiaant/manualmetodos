@@ -135,7 +135,8 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
     return hay && !algunoExistente;
   };
 
-  const visitar = (n: DocJSON) => {
+  /** `prof`: ancestros de `n` sin contar `doc` (el doc se visita con -1). */
+  const visitar = (n: DocJSON, prof: number) => {
     if (esBloque(n) && esExistente(n)) {
       const bid = bidDe(n) as string;
       vistos.add(bid);
@@ -157,12 +158,13 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
         original: [],
         propuesta: [structuredClone(n)],
         tipo: 'bloque-insertado',
+        profundidad: prof,
       });
       return;
     }
-    for (const h of n.content ?? []) visitar(h);
+    for (const h of n.content ?? []) visitar(h, prof + 1);
   };
-  visitar(copia);
+  visitar(copia, -1);
 
   for (const [bid, nodo] of bloquesBase) {
     if (vistos.has(bid)) continue;

@@ -88,6 +88,7 @@ describe('calcularSugerencias', () => {
       bloqueId: 'p1',
       base: { desde: 0, hasta: 0 },
       original: [],
+      profundidad: 0,
     });
     expect(s[0].propuesta).toEqual([parrafo(null, 'Nuevo.')]);
   });
@@ -101,6 +102,7 @@ describe('calcularSugerencias', () => {
       tipo: 'bloque-insertado',
       bloqueId: '@metodo',
       id: 'lab-01:@metodo:+0',
+      profundidad: 0,
     });
   });
 
@@ -109,7 +111,7 @@ describe('calcularSugerencias', () => {
     const copia: DocJSON = { type: 'doc', content: [parrafo(null, 'Antes.'), parrafo('p1', 'Uno.')] };
     const s = calcularSugerencias(base, copia, AUTOR);
     expect(s).toHaveLength(1);
-    expect(s[0]).toMatchObject({ tipo: 'bloque-insertado', bloqueId: '@inicio' });
+    expect(s[0]).toMatchObject({ tipo: 'bloque-insertado', bloqueId: '@inicio', profundidad: 0 });
   });
 
   it('cambio en posicion 0 e insercion tras el mismo bloque tienen ids distintos', () => {
@@ -167,6 +169,17 @@ describe('calcularSugerencias', () => {
     expect(s[0].bloqueId).toBe('p1');
     expect(s[0].propuesta[0].type).toBe('item');
     expect(s[0].propuesta).toEqual([nuevo]);
+    expect(s[0].profundidad).toBe(1);
+  });
+
+  it('profundidad cuenta los ancestros (sin doc) del nodo insertado en la copia', () => {
+    const base = doc(lista(item(null, parrafo('p1', 'Uno.'), lista(item(null, parrafo('p3', 'Tres.'))))));
+    const copia = doc(
+      lista(item(null, parrafo('p1', 'Uno.'), lista(item(null, parrafo('p3', 'Tres.')), item(null, parrafo(null, 'N.'))))),
+    );
+    const s = calcularSugerencias(base, copia, AUTOR);
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ bloqueId: 'p3', profundidad: 3 });
   });
 
   it('parrafo borrado es bloque-eliminado', () => {
