@@ -6,6 +6,13 @@ const attr = <T>(def: T) => ({ default: def });
 /** Atributo `bid` (ID de bloque) con default null. */
 const bid = () => ({ bid: attr<string | null>(null) });
 
+/**
+ * Atributo `pegado` (R22) de los bloques: true si en la fuente LaTeX no hay
+ * línea en blanco entre este bloque y el hermano anterior (cambia la sangría
+ * y el espaciado del párrafo, así que es estructura real).
+ */
+const pegado = () => ({ pegado: attr<boolean>(false) });
+
 /** parseHTML/renderHTML mínimos con `data-tipo` para la demo. */
 function html(tipo: string, tag = 'div') {
   return {
@@ -44,7 +51,7 @@ const Parrafo = Node.create({
   name: 'parrafo',
   group: 'bloque',
   content: 'inline*',
-  addAttributes: bid,
+  addAttributes: () => ({ ...bid(), ...pegado() }),
   ...html('parrafo', 'p'),
 });
 
@@ -52,6 +59,7 @@ const ListaOrdenada = Node.create({
   name: 'listaOrdenada',
   group: 'bloque',
   content: 'item+',
+  addAttributes: pegado,
   ...html('listaOrdenada', 'ol'),
 });
 
@@ -59,6 +67,7 @@ const ListaVinetas = Node.create({
   name: 'listaVinetas',
   group: 'bloque',
   content: 'item+',
+  addAttributes: pegado,
   ...html('listaVinetas', 'ul'),
 });
 
@@ -73,7 +82,7 @@ const Tabla = Node.create({
   name: 'tabla',
   group: 'bloque',
   content: 'filaTabla+',
-  addAttributes: () => ({ columnas: attr<string>('') }),
+  addAttributes: () => ({ columnas: attr<string>(''), ...pegado() }),
   ...html('tabla'),
 });
 
@@ -94,7 +103,7 @@ const Ecuacion = Node.create({
   name: 'ecuacion',
   group: 'bloque',
   atom: true,
-  addAttributes: () => ({ latex: attr<string>(''), ...bid() }),
+  addAttributes: () => ({ latex: attr<string>(''), ...bid(), ...pegado() }),
   ...htmlAtomo('ecuacion', (a) => a.latex, 'div'),
 });
 
@@ -102,7 +111,7 @@ const Especial = Node.create({
   name: 'especial',
   group: 'bloque',
   atom: true,
-  addAttributes: () => ({ latex: attr<string>(''), ...bid() }),
+  addAttributes: () => ({ latex: attr<string>(''), ...bid(), ...pegado() }),
   ...htmlAtomo('especial', (a) => a.latex, 'div'),
 });
 

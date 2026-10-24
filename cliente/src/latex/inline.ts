@@ -56,10 +56,32 @@ const MARCA_DE_MACRO: Record<string, string> = {
   textbf: 'negrita',
   textit: 'cursiva',
   emph: 'cursiva',
+  textsubscript: 'subindice',
+  textsuperscript: 'superindice',
 };
 
 /** Escapes de texto que se convierten en el carácter literal. */
-const ESCAPES = new Set(['%', '&', '_', '$', '#']);
+const ESCAPES = new Set(['%', '&', '_', '$', '#', '{', '}']);
+
+/** R19: palabras de control de texto que se convierten en un carácter. */
+const CARACTER_DE_MACRO: Record<string, string> = {
+  textbackslash: '\\',
+  textasciitilde: '~',
+  textasciicircum: '^',
+};
+
+/** Caracteres literales ↔ marcadores de uso privado (protegidos de `tipografia`). */
+const MARCADOR: Record<string, string> = { '\\': '', '~': '', '^': '' };
+const LITERAL: Record<string, string> = Object.fromEntries(
+  Object.entries(MARCADOR).map(([c, m]) => [m, c]),
+);
+const LITERAL_RE = /[-]/g;
+
+/**
+ * Contenido de un sub/superíndice matemático (`$_{…}$`, `$^{…}$`) que se
+ * importa como texto marcado; el exportador usa el mismo criterio (R18).
+ */
+export const SUBSUP_MATEMATICO = /^[A-Za-z0-9+\-.,()=]+$/;
 
 /** Espacio fino `\,` y espacio irrompible `~`. */
 const ESPACIO_FINO = ' ';
@@ -99,7 +121,7 @@ function subSuperindices(m: Ast.InlineMath): DocJSON[] | null {
     const args = h.args ?? [];
     if (args.length !== 1 || !soloTexto(args[0].content)) return null;
     const t = args[0].content.map((s) => s.content).join('');
-    if (!/^[A-Za-z0-9+-]+$/.test(t)) return null;
+    if (!SUBSUP_MATEMATICO.test(t)) return null;
     salida.push({
       type: 'text',
       text: t,
@@ -145,7 +167,7 @@ function convertir(nodos: Ast.Node[], ctx: CtxImport): DocJSON[] {
   const salida: DocJSON[] = [];
   let texto = '';
   const volcar = () => {
-    const t = tipografia(texto);
+    const t = tipografia(texto).replace(LITERAL_RE, (c) => LITERAL[c]);
     if (t) salida.push({ type: 'text', text: t });
     texto = '';
   };
@@ -156,17 +178,35 @@ function convertir(nodos: Ast.Node[], ctx: CtxImport): DocJSON[] {
 
   for (let i = 0; i < nodos.length; i++) {
     const n = nodos[i];
+    // Como en TeX, los espacios tras una palabra de control no cuentan;
+    // un `{}` inmediato sólo la termina.
+    const terminarPalabraDeControl = () => {
+      while (nodos[i + 1]?.type === 'whitespace') i++;
+      const g = nodos[i + 1];
+      if (g?.type === 'group' && g.content.length === 0) i++;
+    };
     if (n.type === 'string') texto += n.content;
     else if (n.type === 'whitespace' || n.type === 'parbreak') texto += ' ';
     else if (n.type === 'macro' && ESCAPES.has(n.content) && !n.args) texto += n.content;
     else if (n.type === 'macro' && n.content === ',' && !n.args) texto += ESPACIO_FINO;
     else if (n.type === 'macro' && n.content === 'degree' && !n.args) {
       texto += '°';
-      // Como en TeX, los espacios tras una palabra de control no cuentan;
-      // un `{}` inmediato sólo la termina.
-      while (nodos[i + 1]?.type === 'whitespace') i++;
-      const g = nodos[i + 1];
-      if (g?.type === 'group' && g.content.length === 0) i++;
+      terminarPalabraDeControl();
+    } else if (n.type === 'macro' && CARACTER_DE_MACRO[n.content] && !n.args) {
+      // Marcador privado: la tipografía no debe tocar el carácter (`~` → U+00A0).
+      texto += MARCADOR[CARACTER_DE_MACRO[n.content]];
+      terminarPalabraDeControl();
+    } else if (
+      n.type === 'macro' &&
+      MARCA_DE_MACRO[n.content] &&
+      !n.args &&
+      nodos[i + 1]?.type === 'group' &&
+      nodos[i + 1].position?.start.offset === n.position?.end.offset
+    ) {
+      // `\textsubscript{…}` y similares sin firma conocida por el parser.
+      const tipo = MARCA_DE_MACRO[n.content];
+      const g = nodos[++i] as Ast.Group;
+      emitir(...convertir(g.content, ctx).map((h) => marcar(h, tipo)));
     } else if (n.type === 'inlinemath') {
       const nodosMath = mathInline(n, ctx);
       if (nodosMath) emitir(...nodosMath);

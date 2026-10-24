@@ -39,6 +39,9 @@ const ESTRUCTURA_TABLA = new Set([
   'newline',
 ]);
 
+/** Bloques con el atributo `pegado` (R22). */
+const CON_PEGADO = new Set(['parrafo', 'ecuacion', 'tabla', 'listaOrdenada', 'listaVinetas', 'especial']);
+
 const esLista = (b: DocJSON | undefined) =>
   b?.type === 'listaOrdenada' || b?.type === 'listaVinetas';
 
@@ -257,9 +260,18 @@ class Importador {
   bloques(nodos: Ast.Node[], exigirParrafo = false): DocJSON[] {
     const salida: DocJSON[] = [];
     let corrida: Ast.Node[] = [];
+    // R22: ¿hubo una línea en blanco desde el último bloque emitido?
+    let separado = false;
+    const agregar = (b: DocJSON) => {
+      if (salida.length > 0 && !separado && CON_PEGADO.has(b.type!)) {
+        b.attrs = { ...b.attrs, pegado: true };
+      }
+      salida.push(b);
+      separado = false;
+    };
     const empujarBloque = (crear: () => DocJSON) => {
-      if (exigirParrafo && salida.length === 0) salida.push(this.parrafo([]));
-      salida.push(crear());
+      if (exigirParrafo && salida.length === 0) agregar(this.parrafo([]));
+      agregar(crear());
     };
     const cerrar = () => {
       const r = recortar(corrida);
@@ -268,7 +280,7 @@ class Importador {
       // Comentarios aislados (sin texto en su párrafo): bloques `especial`.
       if (r.every((n) => n.type === 'comment' || n.type === 'whitespace')) {
         for (const c of r) if (c.type === 'comment') empujarBloque(() => this.especial(c));
-      } else salida.push(this.parrafo(r));
+      } else agregar(this.parrafo(r));
     };
     const bloque = (crear: () => DocJSON) => {
       cerrar();
@@ -287,7 +299,10 @@ class Importador {
         continue;
       }
       if (n.type !== 'whitespace') trasLista = false;
-      if (n.type === 'parbreak') cerrar();
+      if (n.type === 'parbreak') {
+        cerrar();
+        separado = true;
+      }
       else if (n.type === 'macro' && n.content === 'section') bloque(() => this.seccion(n));
       else if (n.type === 'macro' && SECCIONAMIENTO_OTRO.has(n.content))
         bloque(() => this.especial(n));
@@ -301,7 +316,7 @@ class Importador {
       else corrida.push(n);
     }
     cerrar();
-    if (exigirParrafo && salida.length === 0) salida.push(this.parrafo([]));
+    if (exigirParrafo && salida.length === 0) agregar(this.parrafo([]));
     return salida;
   }
 

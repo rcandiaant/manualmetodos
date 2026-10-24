@@ -48,6 +48,34 @@ describe('esquema del manual', () => {
     expect(out.content[2].content[1].attrs.bloques).toEqual(bloques);
   });
 
+  it('pegado (R22) viaja en los bloques y vale false por defecto', () => {
+    const item = (x: string): DocJSON => ({ type: 'item', content: [p(x)] });
+    const d = doc(
+      p('a'),
+      { type: 'parrafo', attrs: { pegado: true }, content: [t('b')] },
+      { type: 'ecuacion', attrs: { latex: 'x', pegado: true } },
+      { type: 'especial', attrs: { latex: '%c', pegado: true } },
+      {
+        type: 'tabla',
+        attrs: { columnas: 'l', pegado: true },
+        content: [{ type: 'filaTabla', content: [{ type: 'celda', content: [t('c')] }] }],
+      },
+      { type: 'listaOrdenada', attrs: { pegado: true }, content: [item('i')] },
+      { type: 'listaVinetas', attrs: { pegado: true }, content: [item('j')] },
+    );
+    expect(validarDocumento(d)).toEqual({ ok: true });
+    const out = Node.fromJSON(esquemaManual, d).toJSON();
+    expect(out.content.slice(2).map((b: DocJSON) => b.attrs?.pegado)).toEqual([
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
+
   it('rechaza notaPie con bloques invalidos', () => {
     const d = doc({
       type: 'parrafo',

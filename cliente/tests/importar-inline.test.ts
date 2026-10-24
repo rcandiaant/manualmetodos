@@ -130,6 +130,25 @@ describe('importarLatex — inline, ecuaciones y tablas', () => {
     expect(bloques[1].attrs?.latex).toBe('a + b');
   });
 
+  it('pegado: el párrafo dividido por una ecuación queda pegado; con línea en blanco no', () => {
+    const { bloques } = cuerpo('antes\n\\[\n  a + b\n\\]\ndespués\n\notro');
+    expect(bloques.map((b) => b.attrs?.pegado ?? false)).toEqual([false, true, true, false]);
+    const sep = cuerpo('antes\n\n\\[ a \\]\n\ndespués').bloques;
+    expect(sep.map((b) => b.attrs?.pegado ?? false)).toEqual([false, false, false]);
+  });
+
+  it('pegado: texto justo tras una lista y tabla en el flujo del párrafo', () => {
+    const { bloques } = cuerpo(
+      '\\begin{itemize}\n\\item a\n\\end{itemize}\nsigue\n\\begin{tabular}{l}\nx \\\\\n\\end{tabular}\n\nfin',
+    );
+    expect(bloques.map((b) => [b.type, b.attrs?.pegado ?? false])).toEqual([
+      ['listaVinetas', false],
+      ['parrafo', true],
+      ['tabla', true],
+      ['parrafo', false],
+    ]);
+  });
+
   it('tabular a tabla', () => {
     const { doc } = importarLatex(fixture);
     const [tabla] = deTipo(doc, 'tabla');
