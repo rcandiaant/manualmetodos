@@ -64,6 +64,12 @@ final class Consulta
         return $f?->setTimezone(new \DateTimeZone(self::UTC))->format('Y-m-d\TH:i:s\Z');
     }
 
+    /** DATETIME de la base (UTC) → fecha; null si es NULL. */
+    public static function desdeSql(mixed $v): ?\DateTimeImmutable
+    {
+        return self::fecha($v);
+    }
+
     private static function sql(\DateTimeImmutable $f): string
     {
         return $f->setTimezone(new \DateTimeZone(self::UTC))->format('Y-m-d H:i:s');

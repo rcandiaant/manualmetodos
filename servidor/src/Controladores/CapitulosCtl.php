@@ -7,6 +7,7 @@ namespace Manual\Controladores;
 use Manual\Acceso\Capitulos;
 use Manual\Acceso\Comentarios;
 use Manual\Acceso\Sugerencias;
+use Manual\Dominio\Rol;
 use Manual\Http\ErrorHttp;
 use Manual\Http\Peticion;
 use Manual\Http\Respuesta;
@@ -31,10 +32,27 @@ final class CapitulosCtl
         $u = $this->sesion->exigirRol();
         $cambios = $this->sugerencias->conteoPorCapitulo($u['id']);
         $comentarios = $this->comentarios->conteoPorCapitulo($u['id']);
-        $lista = array_map(fn (array $c): array => $c + [
-            'misCambios' => $cambios[$c['id']] ?? 0,
-            'misComentarios' => $comentarios[$c['id']] ?? 0,
-        ], $this->capitulos->listar());
+        // Totales de todos los laboratorios: solo para quien tiene rol revisor.
+        $revisor = in_array(Rol::REVISOR, $u['roles'], true);
+        $totSug = $revisor ? $this->sugerencias->resumenPorCapitulo() : [];
+        $totCom = $revisor ? $this->comentarios->resumenPorCapitulo() : [];
+        $lista = array_map(function (array $c) use ($cambios, $comentarios, $revisor, $totSug, $totCom): array {
+            $c += [
+                'misCambios' => $cambios[$c['id']] ?? 0,
+                'misComentarios' => $comentarios[$c['id']] ?? 0,
+            ];
+            if ($revisor) {
+                $s = $totSug[$c['id']] ?? ['total' => 0, 'pendientes' => 0];
+                $k = $totCom[$c['id']] ?? ['total' => 0, 'abiertos' => 0];
+                $c += [
+                    'totalSugerencias' => $s['total'],
+                    'totalComentarios' => $k['total'],
+                    // Trabajo por hacer: sugerencias pendientes más comentarios abiertos.
+                    'pendientes' => $s['pendientes'] + $k['abiertos'],
+                ];
+            }
+            return $c;
+        }, $this->capitulos->listar());
         return Respuesta::json(200, $lista);
     }
 

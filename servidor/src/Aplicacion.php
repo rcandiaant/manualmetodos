@@ -17,6 +17,7 @@ use Manual\Controladores\CapitulosCtl;
 use Manual\Controladores\ComentariosCtl;
 use Manual\Controladores\ConsultaCtl;
 use Manual\Controladores\CopiaCtl;
+use Manual\Controladores\RevisionCtl;
 use Manual\Controladores\SesionCtl;
 use Manual\Http\Enrutador;
 use Manual\Http\ErrorHttp;
@@ -94,7 +95,14 @@ final class Aplicacion
         $this->ruta('PATCH', '/api/comentarios/{id}', fn (Peticion $p, array $a) => $this->comentariosCtl()->editar($p, $a));
         $this->ruta('DELETE', '/api/comentarios/{id}', fn (Peticion $p, array $a) => $this->comentariosCtl()->borrar($p, $a));
 
-        $this->ruta('POST', '/api/admin/capitulos', fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
+        $this->ruta('GET', '/api/capitulos/{id}/mis-aportes', fn (Peticion $p, array $a) => $this->revisionCtl()->misAportes($p, $a));
+        $this->ruta('GET', '/api/capitulos/{id}/aportes', fn (Peticion $p, array $a) => $this->revisionCtl()->aportes($p, $a));
+        $this->ruta('PATCH', '/api/sugerencias/{id}', fn (Peticion $p, array $a) => $this->revisionCtl()->resolverSugerencia($p, $a));
+        $this->ruta('PATCH', '/api/comentarios/{id}/resolucion', fn (Peticion $p, array $a) => $this->revisionCtl()->resolverComentario($p, $a));
+        $this->ruta('PUT', '/api/capitulos/{id}/final', fn (Peticion $p, array $a) => $this->revisionCtl()->guardarFinal($p, $a));
+        $this->ruta('GET', '/api/capitulos/{id}/final', fn (Peticion $p, array $a) => $this->revisionCtl()->verFinal($p, $a));
+
+        $this->ruta('POST', '/api/admin/capitulos',fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
         $this->ruta('GET', '/api/admin/usuarios', fn (Peticion $p) => $this->adminCtl()->listarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/importar', fn (Peticion $p) => $this->adminCtl()->importarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/{id}/clave', fn (Peticion $p, array $a) => $this->adminCtl()->regenerarClave($p, $a));
@@ -163,6 +171,19 @@ final class Aplicacion
     private function comentariosCtl(): ComentariosCtl
     {
         return new ComentariosCtl($this->sesion(), $this->capitulos(), new Comentarios($this->bd()), new Consulta($this->bd(), $this->reloj), $this->reloj);
+    }
+
+    private function revisionCtl(): RevisionCtl
+    {
+        return new RevisionCtl(
+            $this->sesion(),
+            $this->capitulos(),
+            new Sugerencias($this->bd()),
+            new Comentarios($this->bd()),
+            new Consulta($this->bd(), $this->reloj),
+            $this->auditoria(),
+            $this->reloj,
+        );
     }
 
     private function adminCtl(): AdminCtl

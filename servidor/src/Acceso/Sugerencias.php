@@ -110,6 +110,120 @@ final class Sugerencias
         }
     }
 
+    /**
+     * Sugerencias propias con su resolución (lo que el laboratorio ve en edicion_final).
+     * @return list<\stdClass>
+     */
+    public function propiasConResolucion(int $usuarioId, int $capituloId): array
+    {
+        $st = $this->bd->prepare(
+            'SELECT datos, motivo, estado, nota_resolucion FROM sugerencias
+             WHERE usuario_id = ? AND capitulo_id = ? ORDER BY id'
+        );
+        $st->execute([$usuarioId, $capituloId]);
+        $res = [];
+        foreach ($st->fetchAll() as $f) {
+            $s = json_decode($f['datos'], false, 512, JSON_THROW_ON_ERROR);
+            $s->autor = self::claveAutor($usuarioId);
+            if ($f['motivo'] !== null) {
+                $s->motivo = $f['motivo'];
+            }
+            $s->estado = $f['estado'];
+            $s->notaResolucion = $f['nota_resolucion'];
+            $res[] = $s;
+        }
+        return $res;
+    }
+
+    // ------------------------------------------------------------------
+    // Acceso del revisor: SIN filtro por usuario. Solo se llama tras exigirRol('revisor').
+    // ------------------------------------------------------------------
+
+    /**
+     * Todas las sugerencias del capítulo, de todos los laboratorios.
+     * `sugerenciaId` es el id de la fila (el de PATCH /sugerencias/{id}); `id` sigue siendo el uid del cliente.
+     * @return list<\stdClass>
+     */
+    public function todasDelCapitulo(int $capituloId): array
+    {
+        $st = $this->bd->prepare(
+            'SELECT s.id AS fila, s.usuario_id, s.version_base_id, s.datos, s.motivo, s.estado, s.nota_resolucion,
+                    s.derivada_reunion, s.resuelto_por, s.resuelto_en, u.laboratorio
+             FROM sugerencias s JOIN usuarios u ON u.id = s.usuario_id
+             WHERE s.capitulo_id = ? ORDER BY s.id'
+        );
+        $st->execute([$capituloId]);
+        $res = [];
+        foreach ($st->fetchAll() as $f) {
+            $s = json_decode($f['datos'], false, 512, JSON_THROW_ON_ERROR);
+            $s->autor = self::claveAutor((int) $f['usuario_id']);
+            if ($f['motivo'] !== null) {
+                $s->motivo = $f['motivo'];
+            }
+            $s->sugerenciaId = (int) $f['fila'];
+            $s->usuarioId = (int) $f['usuario_id'];
+            $s->laboratorio = $f['laboratorio'];
+            $s->versionId = (int) $f['version_base_id'];
+            $s->estado = $f['estado'];
+            $s->notaResolucion = $f['nota_resolucion'];
+            $s->derivadaReunion = (bool) $f['derivada_reunion'];
+            $s->resueltoPor = $f['resuelto_por'] === null ? null : (int) $f['resuelto_por'];
+            $s->resueltoEn = Consulta::iso(Consulta::desdeSql($f['resuelto_en']));
+            $res[] = $s;
+        }
+        return $res;
+    }
+
+    /** @return array<int,array{total:int,pendientes:int}> capituloId => totales de todos los laboratorios */
+    public function resumenPorCapitulo(): array
+    {
+        $filas = $this->bd->query(
+            "SELECT capitulo_id, COUNT(*) AS n, SUM(estado = 'pendiente') AS p FROM sugerencias GROUP BY capitulo_id"
+        )->fetchAll();
+        $res = [];
+        foreach ($filas as $f) {
+            $res[(int) $f['capitulo_id']] = ['total' => (int) $f['n'], 'pendientes' => (int) $f['p']];
+        }
+        return $res;
+    }
+
+    /**
+     * Resuelve una sugerencia (cualquiera). Una sola transacción: bloquea la fila, la actualiza y llama
+     * a `$auditar` con los datos previos antes de confirmar. `pendiente` borra quién y cuándo resolvió.
+     * @param callable(array{capituloId:int,estado:string,derivadaReunion:bool}): void $auditar
+     * @return bool false si la sugerencia no existe
+     */
+    public function resolver(int $id, string $estado, ?string $nota, bool $derivada, int $revisorId, \DateTimeImmutable $ahora, callable $auditar): bool
+    {
+        $this->bd->beginTransaction();
+        try {
+            $st = $this->bd->prepare('SELECT capitulo_id, estado, derivada_reunion FROM sugerencias WHERE id = ? FOR UPDATE');
+            $st->execute([$id]);
+            $f = $st->fetch();
+            if ($f === false) {
+                $this->bd->rollBack();
+                return false;
+            }
+            $pendiente = $estado === 'pendiente';
+            $this->bd->prepare(
+                'UPDATE sugerencias SET estado = ?, nota_resolucion = ?, derivada_reunion = ?, resuelto_por = ?, resuelto_en = ? WHERE id = ?'
+            )->execute([
+                $estado, $nota, $derivada ? 1 : 0,
+                $pendiente ? null : $revisorId,
+                $pendiente ? null : $ahora->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+                $id,
+            ]);
+            $auditar(['capituloId' => (int) $f['capitulo_id'], 'estado' => $f['estado'], 'derivadaReunion' => (bool) $f['derivada_reunion']]);
+            $this->bd->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($this->bd->inTransaction()) {
+                $this->bd->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     /** Fija el motivo de una sugerencia propia (vacío = sin motivo). false si no existe o no es propia. */
     public function actualizarMotivo(int $usuarioId, int $capituloId, int $versionBaseId, string $uid, string $motivo): bool
     {

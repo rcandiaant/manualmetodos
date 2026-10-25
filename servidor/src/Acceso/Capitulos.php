@@ -93,6 +93,26 @@ final class Capitulos
     }
 
     /**
+     * Inserta una versión `final` nueva (las anteriores se conservan). El tex va en `tex_final`;
+     * `tex_original` queda NULL, que es solo de las versiones base.
+     */
+    public function guardarFinal(int $capituloId, string $docJson, string $tex, int $usuarioId): int
+    {
+        $this->bd->prepare("INSERT INTO versiones_capitulo (capitulo_id, tipo, tex_original, doc_json, tex_final, creado_por) VALUES (?, 'final', NULL, ?, ?, ?)")
+            ->execute([$capituloId, $docJson, $tex, $usuarioId]);
+        return (int) $this->bd->lastInsertId();
+    }
+
+    /** La última versión final del capítulo, o null. @return array{versionId:int,docJson:string,tex:string}|null */
+    public function ultimaFinal(int $capituloId): ?array
+    {
+        $st = $this->bd->prepare("SELECT id, doc_json, tex_final FROM versiones_capitulo WHERE capitulo_id = ? AND tipo = 'final' ORDER BY id DESC LIMIT 1");
+        $st->execute([$capituloId]);
+        $f = $st->fetch();
+        return $f === false ? null : ['versionId' => (int) $f['id'], 'docJson' => $f['doc_json'], 'tex' => (string) $f['tex_final']];
+    }
+
+    /**
      * Crea el capítulo (o actualiza título y orden si el slug ya existe) y le añade una versión base.
      * La versión base vigente es la última de tipo `base`.
      * @return array{id:int,versionId:int}
