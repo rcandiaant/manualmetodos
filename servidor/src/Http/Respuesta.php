@@ -39,12 +39,19 @@ final class Respuesta
     }
 
     /**
-     * Añade cabeceras por defecto sin pisar las que la respuesta ya fijó.
+     * Añade cabeceras por defecto sin pisar las que la respuesta ya fijó (nombres sin distinguir mayúsculas).
      * @param array<string,string> $cabeceras
      */
     public function conPorDefecto(array $cabeceras): self
     {
-        return new self($this->estado, $this->datos, $this->cabeceras + $cabeceras);
+        $presentes = array_change_key_case($this->cabeceras, CASE_LOWER);
+        $nuevas = $this->cabeceras;
+        foreach ($cabeceras as $nombre => $valor) {
+            if (!array_key_exists(strtolower((string) $nombre), $presentes)) {
+                $nuevas[$nombre] = $valor;
+            }
+        }
+        return new self($this->estado, $this->datos, $nuevas);
     }
 
     public function sinCuerpo(): self

@@ -8,6 +8,7 @@ services:
       - ./docker/php/desarrollo.ini:/usr/local/etc/php/conf.d/zz-desarrollo.ini:ro
     ports:
       - "8080:80"
+    # SOLO DESARROLLO — nunca usar en producción
     environment:
       BD_HOST: bd
       BD_NOMBRE: manual
@@ -21,6 +22,7 @@ services:
         condition: service_healthy
 
   bd:
+    # SOLO DESARROLLO — nunca usar en producción
     image: mariadb:10.6
     environment:
       MARIADB_ROOT_PASSWORD: root_dev

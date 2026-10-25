@@ -48,6 +48,7 @@ jobs:
           --health-retries=20
     env:
       BD_HOST: 127.0.0.1
+      BD_PRUEBAS_DSN: "mysql:host=127.0.0.1;port=3306;dbname=manual_pruebas;charset=utf8mb4"
       BD_NOMBRE_PRUEBAS: manual_pruebas
       BD_USUARIO: manual
       BD_CLAVE: manual_ci
