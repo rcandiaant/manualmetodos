@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 CREATE TABLE IF NOT EXISTS capitulos (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   orden INT NOT NULL,
-  slug VARCHAR(190) NOT NULL,
+  slug VARCHAR(190) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   titulo VARCHAR(255) NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_capitulos_slug (slug)
@@ -76,15 +76,17 @@ CREATE TABLE IF NOT EXISTS revisiones_copia (
   CONSTRAINT fk_revisiones_capitulo FOREIGN KEY (capitulo_id) REFERENCES capitulos (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Identificadores que PHP compara exactos (uid, bloque_id, grupo, slug) van en utf8mb4_bin.
+-- utf8mb4_bin es PAD SPACE: por eso el id de sugerencia no admite espacios (ValidadorSugerencia).
 CREATE TABLE IF NOT EXISTS sugerencias (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   usuario_id INT UNSIGNED NOT NULL,
   capitulo_id INT UNSIGNED NOT NULL,
   version_base_id INT UNSIGNED NOT NULL,
-  uid VARCHAR(190) NOT NULL,
-  bloque_id VARCHAR(190) NOT NULL,
+  uid VARCHAR(190) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  bloque_id VARCHAR(190) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   tipo VARCHAR(64) NOT NULL,
-  grupo VARCHAR(190) NULL,
+  grupo VARCHAR(190) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   datos LONGTEXT NOT NULL,
   motivo TEXT NULL,
   estado ENUM('pendiente','aceptada','rechazada','modificada') NOT NULL DEFAULT 'pendiente',
@@ -108,7 +110,7 @@ CREATE TABLE IF NOT EXISTS comentarios (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   usuario_id INT UNSIGNED NOT NULL,
   capitulo_id INT UNSIGNED NOT NULL,
-  bloque_id VARCHAR(190) NOT NULL,
+  bloque_id VARCHAR(190) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   rango LONGTEXT NOT NULL,
   texto TEXT NOT NULL,
   estado ENUM('abierto','resuelto') NOT NULL DEFAULT 'abierto',

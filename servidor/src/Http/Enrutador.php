@@ -6,10 +6,35 @@ namespace Manual\Http;
 
 final class Enrutador
 {
+    /** Lo que casa en la ruta cruda (sin decodificar). {uid} admite la forma con %XX de encodeURIComponent. */
     private const PARAMETROS = [
         '{id}' => '(?P<id>[0-9]+)',
-        '{uid}' => '(?P<uid>[A-Za-z0-9:@+_-]{1,190})',
+        '{uid}' => '(?P<uid>[^/]{1,570})',
     ];
+
+    /** Lo que debe cumplir cada parámetro ya decodificado (rawurldecode: «+» sigue siendo «+»). */
+    private const DECODIFICADOS = [
+        'id' => '/^[0-9]+$/D',
+        'uid' => '/^[A-Za-z0-9:@+_-]{1,190}$/D', // = ValidadorSugerencia::PATRON_ID
+    ];
+
+    /**
+     * Decodifica los parámetros y los valida; null si alguno no cumple (la ruta no casa).
+     * @param array<string,string> $crudos
+     * @return array<string,string>|null
+     */
+    private static function decodificar(array $crudos): ?array
+    {
+        $res = [];
+        foreach ($crudos as $nombre => $valor) {
+            $valor = rawurldecode($valor);
+            if (preg_match(self::DECODIFICADOS[$nombre], $valor) !== 1) {
+                return null;
+            }
+            $res[$nombre] = $valor;
+        }
+        return $res;
+    }
 
     /** @var list<array{metodo:string,regex:string,manejador:callable}> */
     private array $rutas = [];
@@ -32,8 +57,11 @@ final class Enrutador
             if (preg_match($ruta['regex'], $p->ruta, $m) !== 1) {
                 continue;
             }
+            $params = self::decodificar(array_filter($m, 'is_string', ARRAY_FILTER_USE_KEY));
+            if ($params === null) {
+                continue;
+            }
             if ($ruta['metodo'] === $metodo) {
-                $params = array_filter($m, 'is_string', ARRAY_FILTER_USE_KEY);
                 return ($ruta['manejador'])($p, $params);
             }
             $permitidos[] = $ruta['metodo'];

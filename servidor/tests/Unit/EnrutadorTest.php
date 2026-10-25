@@ -35,6 +35,22 @@ final class EnrutadorTest extends TestCase
         $this->assertSame(404, $e->resolver($this->peticion('PATCH', '/api/capitulos/7/sugerencias/a b'))->estado);
     }
 
+    public function test_parametros_codificados_se_decodifican_y_validan(): void
+    {
+        $e = new Enrutador();
+        $e->agregar('PATCH', '/api/capitulos/{id}/sugerencias/{uid}', fn (Peticion $p, array $params) => Respuesta::json(200, $params));
+        // encodeURIComponent('u1:b+0@x') = 'u1%3Ab%2B0%40x'; '+' literal no es espacio.
+        $r = $e->resolver($this->peticion('PATCH', '/api/capitulos/7/sugerencias/u1%3Ab%2B0%40x'));
+        $this->assertSame(200, $r->estado);
+        $this->assertSame(['id' => '7', 'uid' => 'u1:b+0@x'], $r->datos);
+        $this->assertSame('u1:b+0', $e->resolver($this->peticion('PATCH', '/api/capitulos/7/sugerencias/u1:b+0'))->datos['uid']);
+        // Decodificado fuera del alfabeto o del largo: no casa.
+        foreach (['a%20b', 'a%2Fb', 'a%2Eb', 'a%zz', 'a%', str_repeat('a', 191), str_repeat('%61', 191)] as $malo) {
+            $this->assertSame(404, $e->resolver($this->peticion('PATCH', "/api/capitulos/7/sugerencias/$malo"))->estado, $malo);
+        }
+        $this->assertSame(200, $e->resolver($this->peticion('PATCH', '/api/capitulos/7/sugerencias/' . str_repeat('%61', 190)))->estado);
+    }
+
     public function test_metodo_no_permitido_da_405_con_allow(): void
     {
         $e = new Enrutador();

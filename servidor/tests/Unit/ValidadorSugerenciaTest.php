@@ -13,7 +13,7 @@ final class ValidadorSugerenciaTest extends TestCase
     private static function sugerencia(array $cambios = []): array
     {
         return array_merge([
-            'id' => 'Lab A:p1:0a1b2c3d',
+            'id' => 'LabA:p1:0a1b2c3d',
             'autor' => 'Lab A',
             'bloqueId' => 'p1',
             'base' => ['desde' => 2, 'hasta' => 4],
@@ -93,6 +93,11 @@ final class ValidadorSugerenciaTest extends TestCase
         }
         $this->assertFalla(self::sugerencia(['id' => str_repeat('a', 191)]));
         $this->assertFalla(self::sugerencia(['id' => '']));
+        // El id usa el mismo alfabeto que el parámetro {uid} de la ruta.
+        foreach (['a b:c', 'a.b:c', 'a/b', 'á:b', "a:b
+"] as $id) {
+            $this->assertFalla(self::sugerencia(['id' => $id]));
+        }
         $this->assertFalla(self::sugerencia(['base' => ['desde' => -1, 'hasta' => 0]]));
         $this->assertFalla(self::sugerencia(['copia' => ['desde' => '1', 'hasta' => 2]]));
         $this->assertFalla(self::sugerencia(['copia' => ['desde' => 3, 'hasta' => 2]]));

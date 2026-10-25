@@ -17,6 +17,11 @@ final class ValidadorSugerencia
 {
     public const TIPOS = ['contenido', 'formato', 'bloque-insertado', 'bloque-eliminado'];
     public const LARGO_ID = 190;
+    /**
+     * Alfabeto del id (uid): el mismo que acepta el parámetro {uid} de la ruta, ya decodificado.
+     * Sin espacios: la columna es utf8mb4_bin, que es PAD SPACE ('x' = 'x ').
+     */
+    public const PATRON_ID = '/^[A-Za-z0-9:@+_-]{1,190}$/D';
     public const LARGO_MOTIVO = 2000;
 
     /** @throws ErrorHttp */
@@ -29,8 +34,12 @@ final class ValidadorSugerencia
             throw new ErrorHttp(400, 'entrada_invalida', 'La sugerencia debe ser un objeto', ['sugerencia' => 'debe ser un objeto']);
         }
 
+        $id = Entrada::texto($s, 'id', self::LARGO_ID);
+        if (preg_match(self::PATRON_ID, $id) !== 1) {
+            throw Entrada::invalido('id', 'solo letras ASCII, números y : @ + _ -');
+        }
         $r = [
-            'id' => Entrada::texto($s, 'id', self::LARGO_ID),
+            'id' => $id,
             'bloqueId' => Entrada::texto($s, 'bloqueId', self::LARGO_ID),
             'base' => self::rango($s, 'base', $estricto),
             'copia' => self::rango($s, 'copia', $estricto),

@@ -6,11 +6,17 @@ namespace Manual;
 
 use Manual\Acceso\Auditoria;
 use Manual\Acceso\Capitulos;
+use Manual\Acceso\Comentarios;
 use Manual\Acceso\Consulta;
+use Manual\Acceso\Copias;
+use Manual\Acceso\Sugerencias;
 use Manual\Acceso\Usuarios;
 use Manual\Bd\Conexion;
 use Manual\Controladores\AdminCtl;
+use Manual\Controladores\CapitulosCtl;
+use Manual\Controladores\ComentariosCtl;
 use Manual\Controladores\ConsultaCtl;
+use Manual\Controladores\CopiaCtl;
 use Manual\Controladores\SesionCtl;
 use Manual\Http\Enrutador;
 use Manual\Http\ErrorHttp;
@@ -78,6 +84,16 @@ final class Aplicacion
 
         $this->ruta('GET', '/api/consulta', fn (Peticion $p) => $this->consultaCtl()->ver($p));
 
+        $this->ruta('GET', '/api/capitulos', fn (Peticion $p) => $this->capitulosCtl()->listar($p));
+        $this->ruta('GET', '/api/capitulos/{id}/base', fn (Peticion $p, array $a) => $this->capitulosCtl()->base($p, $a));
+        $this->ruta('GET', '/api/capitulos/{id}/copia', fn (Peticion $p, array $a) => $this->copiaCtl()->ver($p, $a));
+        $this->ruta('PUT', '/api/capitulos/{id}/copia', fn (Peticion $p, array $a) => $this->copiaCtl()->guardar($p, $a));
+        $this->ruta('PATCH', '/api/capitulos/{id}/sugerencias/{uid}', fn (Peticion $p, array $a) => $this->copiaCtl()->motivo($p, $a));
+        $this->ruta('GET', '/api/capitulos/{id}/comentarios', fn (Peticion $p, array $a) => $this->comentariosCtl()->listar($p, $a));
+        $this->ruta('POST', '/api/capitulos/{id}/comentarios', fn (Peticion $p, array $a) => $this->comentariosCtl()->crear($p, $a));
+        $this->ruta('PATCH', '/api/comentarios/{id}', fn (Peticion $p, array $a) => $this->comentariosCtl()->editar($p, $a));
+        $this->ruta('DELETE', '/api/comentarios/{id}', fn (Peticion $p, array $a) => $this->comentariosCtl()->borrar($p, $a));
+
         $this->ruta('POST', '/api/admin/capitulos', fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
         $this->ruta('GET', '/api/admin/usuarios', fn (Peticion $p) => $this->adminCtl()->listarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/importar', fn (Peticion $p) => $this->adminCtl()->importarUsuarios($p));
@@ -111,6 +127,11 @@ final class Aplicacion
         return new Usuarios($this->bd(), new Cifrado($this->config->claveCifrado, $this->config->claveIndice));
     }
 
+    private function capitulos(): Capitulos
+    {
+        return new Capitulos($this->bd(), null, Capitulos::prefijoInstalacion($this->config));
+    }
+
     private function auditoria(): Auditoria
     {
         return new Auditoria($this->bd(), $this->reloj);
@@ -121,12 +142,35 @@ final class Aplicacion
         return new ConsultaCtl($this->sesion(), new Consulta($this->bd(), $this->reloj));
     }
 
+    private function capitulosCtl(): CapitulosCtl
+    {
+        return new CapitulosCtl($this->sesion(), $this->capitulos(), new Sugerencias($this->bd()), new Comentarios($this->bd()));
+    }
+
+    private function copiaCtl(): CopiaCtl
+    {
+        $sugerencias = new Sugerencias($this->bd());
+        return new CopiaCtl(
+            $this->sesion(),
+            $this->capitulos(),
+            new Copias($this->bd(), $sugerencias),
+            $sugerencias,
+            new Consulta($this->bd(), $this->reloj),
+            $this->reloj,
+        );
+    }
+
+    private function comentariosCtl(): ComentariosCtl
+    {
+        return new ComentariosCtl($this->sesion(), $this->capitulos(), new Comentarios($this->bd()), new Consulta($this->bd(), $this->reloj), $this->reloj);
+    }
+
     private function adminCtl(): AdminCtl
     {
         return new AdminCtl(
             $this->sesion(),
             $this->usuarios(),
-            new Capitulos($this->bd()),
+            $this->capitulos(),
             new Consulta($this->bd(), $this->reloj),
             $this->auditoria(),
             $this->reloj,
