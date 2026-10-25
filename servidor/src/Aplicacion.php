@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Manual;
 
 use Manual\Acceso\Auditoria;
+use Manual\Acceso\Capitulos;
+use Manual\Acceso\Consulta;
 use Manual\Acceso\Usuarios;
 use Manual\Bd\Conexion;
+use Manual\Controladores\AdminCtl;
+use Manual\Controladores\ConsultaCtl;
 use Manual\Controladores\SesionCtl;
 use Manual\Http\Enrutador;
 use Manual\Http\ErrorHttp;
@@ -71,6 +75,15 @@ final class Aplicacion
         $this->ruta('POST', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->entrar($p), exentoCsrf: true);
         $this->ruta('GET', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->actual($p));
         $this->ruta('DELETE', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->salir($p));
+
+        $this->ruta('GET', '/api/consulta', fn (Peticion $p) => $this->consultaCtl()->ver($p));
+
+        $this->ruta('POST', '/api/admin/capitulos', fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
+        $this->ruta('GET', '/api/admin/usuarios', fn (Peticion $p) => $this->adminCtl()->listarUsuarios($p));
+        $this->ruta('POST', '/api/admin/usuarios/importar', fn (Peticion $p) => $this->adminCtl()->importarUsuarios($p));
+        $this->ruta('POST', '/api/admin/usuarios/{id}/clave', fn (Peticion $p, array $a) => $this->adminCtl()->regenerarClave($p, $a));
+        $this->ruta('PATCH', '/api/admin/usuarios/{id}', fn (Peticion $p, array $a) => $this->adminCtl()->actualizarUsuario($p, $a));
+        $this->ruta('PUT', '/api/admin/consulta', fn (Peticion $p) => $this->adminCtl()->guardarConsulta($p));
     }
 
     /**
@@ -103,6 +116,23 @@ final class Aplicacion
         return new Auditoria($this->bd(), $this->reloj);
     }
 
+    private function consultaCtl(): ConsultaCtl
+    {
+        return new ConsultaCtl($this->sesion(), new Consulta($this->bd(), $this->reloj));
+    }
+
+    private function adminCtl(): AdminCtl
+    {
+        return new AdminCtl(
+            $this->sesion(),
+            $this->usuarios(),
+            new Capitulos($this->bd()),
+            new Consulta($this->bd(), $this->reloj),
+            $this->auditoria(),
+            $this->reloj,
+        );
+    }
+
     private function sesionCtl(): SesionCtl
     {
         return new SesionCtl($this->sesion(), $this->usuarios(), new LimiteIntentos($this->bd(), $this->reloj), $this->auditoria());
@@ -124,8 +154,9 @@ final class Aplicacion
             $largo = $p->cabecera('content-length') ?? '';
             $largo = ctype_digit($largo) ? (int) $largo : 0;
             // Cuerpo vacío con Content-Length > 0: PHP lo descartó (excede post_max_size).
-            if (strlen($p->cuerpo) > Peticion::LIMITE_CUERPO || $largo > Peticion::LIMITE_CUERPO || ($largo > 0 && $p->cuerpo === '')) {
-                throw new ErrorHttp(413, 'cuerpo_muy_grande', 'El cuerpo de la petición supera el límite de 2 MB.');
+            $limite = Peticion::limiteCuerpo($p->metodo, $p->ruta);
+            if (strlen($p->cuerpo) > $limite || $largo > $limite || ($largo > 0 && $p->cuerpo === '')) {
+                throw new ErrorHttp(413, 'cuerpo_muy_grande', 'El cuerpo de la petición supera el límite de ' . ($limite >> 20) . ' MB.');
             }
             PoliticaPeticion::verificar($p);
             $r = $this->enrutador->resolver($p);

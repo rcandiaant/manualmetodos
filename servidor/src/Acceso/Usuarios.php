@@ -64,6 +64,76 @@ final class Usuarios
     }
 
     /**
+     * Lista para el administrador, con el correo descifrado. Nunca incluye clave_hash.
+     * @return list<array{id:int,nombre:string,laboratorio:string,correo:string,roles:list<string>,activo:bool}>
+     */
+    public function listar(): array
+    {
+        $filas = $this->bd->query('SELECT id, nombre, laboratorio, correo_cifrado, roles, activo FROM usuarios ORDER BY laboratorio, nombre, id')->fetchAll();
+        $salida = [];
+        foreach ($filas as $f) {
+            $salida[] = [
+                'id' => (int) $f['id'],
+                'nombre' => (string) $f['nombre'],
+                'laboratorio' => (string) $f['laboratorio'],
+                'correo' => $this->cifrado->descifrar((string) $f['correo_cifrado']),
+                'roles' => $f['roles'] === '' ? [] : explode(',', (string) $f['roles']),
+                'activo' => (int) $f['activo'] === 1,
+            ];
+        }
+        return $salida;
+    }
+
+    /**
+     * Crea varias cuentas laboratorio en una transacción: o todas o ninguna.
+     * @param list<array{nombre:string,correo:string,laboratorio:string,clave_hash:string}> $filas
+     * @return list<int> ids creados
+     * @throws \PDOException si algún correo ya existe (SQLSTATE 23000); no queda ninguna creada
+     */
+    public function crearLote(array $filas): array
+    {
+        $this->bd->beginTransaction();
+        try {
+            $ids = [];
+            foreach ($filas as $f) {
+                $ids[] = $this->crear($f['nombre'], $f['correo'], $f['laboratorio'], $f['clave_hash'], [Rol::LABORATORIO]);
+            }
+            $this->bd->commit();
+            return $ids;
+        } catch (\Throwable $e) {
+            if ($this->bd->inTransaction()) {
+                $this->bd->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function cambiarClave(int $id, string $claveHash): void
+    {
+        $this->bd->prepare('UPDATE usuarios SET clave_hash = ? WHERE id = ?')->execute([$claveHash, $id]);
+    }
+
+    /** @param list<string>|null $roles */
+    public function actualizar(int $id, ?bool $activo, ?array $roles): void
+    {
+        $sets = [];
+        $valores = [];
+        if ($activo !== null) {
+            $sets[] = 'activo = ?';
+            $valores[] = $activo ? 1 : 0;
+        }
+        if ($roles !== null) {
+            $sets[] = 'roles = ?';
+            $valores[] = implode(',', array_values(array_unique($roles)));
+        }
+        if ($sets === []) {
+            return;
+        }
+        $valores[] = $id;
+        $this->bd->prepare('UPDATE usuarios SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($valores);
+    }
+
+    /**
      * DTO público del usuario de la sesión.
      * @param array{id:int,nombre:string,laboratorio:string,roles:list<string>} $u
      * @return array{id:int,nombre:string,laboratorio:string,roles:list<string>}

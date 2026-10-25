@@ -7,6 +7,15 @@ namespace Manual\Http;
 final class Peticion
 {
     public const LIMITE_CUERPO = 2 * 1024 * 1024;
+    public const LIMITE_CUERPO_CAPITULO = 4 * 1024 * 1024;
+
+    /** Tope de cuerpo por ruta: 4 MB al subir capítulos y al guardar la versión final; 2 MB en el resto. */
+    public static function limiteCuerpo(string $metodo, string $ruta): int
+    {
+        $grande = ($metodo === 'POST' && $ruta === '/api/admin/capitulos')
+            || ($metodo === 'PUT' && preg_match('#^/api/capitulos/[0-9]+/final$#D', $ruta) === 1);
+        return $grande ? self::LIMITE_CUERPO_CAPITULO : self::LIMITE_CUERPO;
+    }
 
     /** @var array<string,string> nombres en minúsculas */
     public readonly array $cabeceras;
@@ -44,15 +53,17 @@ final class Peticion
         // Si no, se lee un byte de más para detectar el exceso sin cargar cuerpos enormes.
         $cuerpo = '';
         $largo = $cabeceras['content-length'] ?? '';
-        $excede = ctype_digit($largo) && (int) $largo > self::LIMITE_CUERPO;
+        $metodo = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        $limite = self::limiteCuerpo($metodo, $ruta);
+        $excede = ctype_digit($largo) && (int) $largo > $limite;
         $flujo = $excede ? false : fopen('php://input', 'rb');
         if ($flujo !== false) {
-            $cuerpo = (string) stream_get_contents($flujo, self::LIMITE_CUERPO + 1);
+            $cuerpo = (string) stream_get_contents($flujo, $limite + 1);
             fclose($flujo);
         }
 
         return new self(
-            strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')),
+            $metodo,
             $ruta,
             $cabeceras,
             $cuerpo,
