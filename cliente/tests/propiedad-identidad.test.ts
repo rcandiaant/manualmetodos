@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Node } from '@tiptap/pm/model';
 import { aplicarSugerencias } from '../src/cambios/aplicar';
-import { detectarCambiosEstructura } from '../src/cambios/estructura';
+import { avisosNoCubiertos, detectarCambiosEstructura } from '../src/cambios/estructura';
 import { calcularSugerencias } from '../src/cambios/sugerencias';
 import { esquemaManual, validarDocumento } from '../src/esquema/esquema';
 import { exportarLatex } from '../src/latex/exportar';
@@ -163,11 +163,48 @@ function eliminarBloque(az: Azar, d: DocJSON): void {
   }
 }
 
-const MUTACIONES = [editarTexto, editarTexto, insertarBloque, eliminarBloque];
+/** Lista que contiene directamente a `it`. */
+const listaDe_ = (d: DocJSON, it: DocJSON): DocJSON | undefined => lugares(d).listas.find((l) => l.content!.includes(it));
+
+/** Backspace al inicio de un ítem que no es el primero: su contenido pasa al ítem anterior. */
+function unirItemAlAnterior(az: Azar, d: DocJSON): void {
+  const candidatos = lugares(d).items.filter((it) => (listaDe_(d, it)?.content!.indexOf(it) ?? 0) > 0);
+  if (candidatos.length === 0) return;
+  const it = az.elegir(candidatos);
+  const l = listaDe_(d, it)!;
+  const i = l.content!.indexOf(it);
+  l.content![i - 1].content!.push(...it.content!);
+  l.content!.splice(i, 1);
+}
+
+/** Saca un ítem de su lista (que conserva al menos uno) y lo pone en otra lista, en cualquier posición. */
+function moverBloqueAOtraLista(az: Azar, d: DocJSON): void {
+  const { items, listas } = lugares(d);
+  const candidatos = items.filter((it) => listaDe_(d, it)!.content!.length > 1);
+  if (candidatos.length === 0) return;
+  const it = az.elegir(candidatos);
+  const origen = listaDe_(d, it)!;
+  const dentro = new Set(lugares(it).listas);
+  const destinos = listas.filter((l) => l !== origen && !dentro.has(l));
+  if (destinos.length === 0) return;
+  const destino = az.elegir(destinos);
+  origen.content!.splice(origen.content!.indexOf(it), 1);
+  destino.content!.splice(az.entero(destino.content!.length + 1), 0, it);
+}
+
+const MUTACIONES = [
+  editarTexto,
+  editarTexto,
+  insertarBloque,
+  eliminarBloque,
+  unirItemAlAnterior,
+  moverBloqueAOtraLista,
+];
 
 describe('propiedad: aplicar todas las sugerencias reproduce la copia (M5)', () => {
   it('15 capítulos sintéticos × 20 copias mutadas', () => {
     let casos = 0;
+    let conMovidos = 0;
     for (let c = 0; c < 15; c++) {
       const az = prng(1000 + c);
       const base = normalizar(capitulo(az, c));
@@ -184,12 +221,15 @@ describe('propiedad: aplicar todas las sugerencias reproduce la copia (M5)', () 
         const aplicado = normalizar(aplicarSugerencias(base, calcularSugerencias(base, copia, 'lab')));
         expect(exportarLatex(aplicado), caso).toBe(exportarLatex(copia));
         expect(aplicado, caso).toEqual(copia);
-        // Editar, insertar y eliminar no son cambios de estructura.
-        expect(detectarCambiosEstructura(base, copia), caso).toEqual([]);
+        // Todo cambio de estructura (unir, mover) queda cubierto por un par aplicable.
+        const sugs = calcularSugerencias(base, copia, 'lab');
+        expect(avisosNoCubiertos(base, copia, sugs), caso).toEqual([]);
+        if (detectarCambiosEstructura(base, copia).length > 0) conMovidos++;
         casos++;
       }
     }
     expect(casos).toBe(300);
+    expect(conMovidos).toBeGreaterThan(50); // las mutaciones de estructura se ejercitan
   });
 });
 

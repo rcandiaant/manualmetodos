@@ -1,5 +1,12 @@
 import type { Sugerencia } from '../tipos';
 
+/**
+ * Clave de un grupo (bloque movido): autor + `grupo`. El mismo `grupo` de dos autores
+ * son grupos distintos. null si la sugerencia no tiene grupo.
+ */
+export const claveGrupo = (s: Sugerencia): string | null =>
+  s.grupo === undefined ? null : `${s.autor}\u0000${s.grupo}`;
+
 export interface Conflicto {
   bloqueId: string;
   ids: string[];
@@ -41,7 +48,10 @@ function chocanPorSiguiente(a: Sugerencia, b: Sugerencia): boolean {
   return xb !== undefined && xb === elimina(a);
 }
 
-/** Grupos (cierre transitivo) de sugerencias en conflicto, en orden de aparición. */
+/**
+ * Grupos (cierre transitivo) de sugerencias en conflicto, en orden de aparición. Los
+ * miembros de un mismo `grupo` (y autor) entran juntos si choca cualquiera de ellos.
+ */
 export function detectarConflictos(sugerencias: Sugerencia[]): Conflicto[] {
   const padre = sugerencias.map((_, i) => i);
   const raiz = (i: number): number => {
@@ -79,6 +89,22 @@ export function detectarConflictos(sugerencias: Sugerencia[]): Conflicto[] {
       enConflicto.add(i).add(j);
       padre[raiz(i)] = raiz(j);
     });
+  }
+
+  // Un grupo (mismo autor y `grupo`: bloque movido) choca si choca cualquiera de sus
+  // miembros: todos entran al mismo conflicto, porque se deciden juntos.
+  const porGrupo = new Map<string, number[]>();
+  sugerencias.forEach((s, i) => {
+    const k = claveGrupo(s);
+    if (k === null) return;
+    porGrupo.set(k, [...(porGrupo.get(k) ?? []), i]);
+  });
+  for (const miembros of porGrupo.values()) {
+    if (!miembros.some((i) => enConflicto.has(i))) continue;
+    for (const i of miembros) {
+      enConflicto.add(i);
+      padre[raiz(i)] = raiz(miembros[0]);
+    }
   }
 
   const grupos = new Map<number, Conflicto>();

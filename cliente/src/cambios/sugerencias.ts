@@ -1,5 +1,6 @@
 import { diffArrays } from 'diff';
 import type { DocJSON, Sugerencia } from '../tipos';
+import { bidsMovidos } from './estructura';
 import { BLOQUES_ATOMICOS, tokenizarBloque, tokensANodos, type Token } from './tokens';
 
 /** Ancla de un bloque insertado antes de cualquier bloque con bid. */
@@ -108,6 +109,13 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
 
   const res: Sugerencia[] = [];
   const vistos = new Set<string>();
+  /**
+   * Bloques movidos o unidos: al recorrer la copia cuentan como no existentes (van
+   * dentro de una inserción, con su bid) y al recorrer la base como eliminados.
+   */
+  const movidos = bidsMovidos(base, copia);
+  /** Grupo de cada bid movido: el de la primera inserción que lo contiene. */
+  const grupoDe = new Map<string, string>();
   /** Inserciones ya emitidas por ancla: dan el `n` del id `${autor}:${ancla}:+${n}`. */
   const insercionesPorAncla = new Map<string, number>();
   let ancla: string | null = null;
@@ -115,7 +123,22 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
   /** Un bloque de la copia es "existente" si su bid está en la base y no se vio antes. */
   const esExistente = (n: DocJSON): boolean => {
     const bid = bidDe(n);
-    return bid !== null && bloquesBase.has(bid) && !vistos.has(bid);
+    return bid !== null && bloquesBase.has(bid) && !vistos.has(bid) && !movidos.has(bid);
+  };
+
+  /** Bids movidos (aún sin grupo) dentro del subárbol, en orden de documento. */
+  const movidosEn = (n: DocJSON): string[] => {
+    const res: string[] = [];
+    const rec = (m: DocJSON) => {
+      if (esBloque(m)) {
+        const bid = bidDe(m);
+        if (bid !== null && movidos.has(bid) && !grupoDe.has(bid) && !res.includes(bid)) res.push(bid);
+        return;
+      }
+      for (const h of m.content ?? []) rec(h);
+    };
+    rec(n);
+    return res;
   };
 
   /** true si el subárbol contiene algún bloque con bid y todos ellos son nuevos. */
@@ -186,6 +209,11 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
         tipo: 'bloque-insertado',
         profundidad: prof,
       };
+      const propios = movidosEn(n);
+      if (propios.length > 0) {
+        s.grupo = `mov:${propios[0]}`;
+        for (const bid of propios) grupoDe.set(bid, s.grupo);
+      }
       res.push(s);
       pendientes.push({ s, padre, esPrimero });
       return;
@@ -198,6 +226,7 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
 
   for (const [bid, nodo] of bloquesBase) {
     if (vistos.has(bid)) continue;
+    const grupo = grupoDe.get(bid);
     res.push({
       id: `${autor}:${bid}:0`,
       autor,
@@ -207,6 +236,7 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
       original: [structuredClone(nodo)],
       propuesta: [],
       tipo: 'bloque-eliminado',
+      ...(grupo !== undefined ? { grupo } : {}),
     });
   }
   return res;

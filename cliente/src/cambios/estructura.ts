@@ -1,13 +1,15 @@
 import { diffArrays } from 'diff';
-import type { DocJSON } from '../tipos';
+import type { DocJSON, Sugerencia } from '../tipos';
+import { claveGrupo } from './conflictos';
 import { bidDe, esBloque } from './sugerencias';
 
 /**
  * I1: cambios de estructura que conservan los bid (unir un ítem al anterior con
  * Backspace, mover un bloque a otro ítem o lista, reordenar, cambiar el tipo).
- * `calcularSugerencias` compara cada bloque existente solo por su contenido
- * inline, así que estos cambios no producen sugerencias ni se aplican; aquí solo
- * se detectan para avisar al laboratorio y al revisor.
+ * `bidsMovidos` da esos bloques; `calcularSugerencias` representa cada uno como un
+ * par eliminación + inserción con el mismo `grupo`. Los avisos se mantienen para
+ * los bloques que, por lo que sea, no queden cubiertos por un par
+ * (`avisosNoCubiertos`): nunca un cambio de lugar silencioso.
  */
 
 interface Ubicado {
@@ -75,12 +77,12 @@ function extracto(nodo: DocJSON, max = 60): string {
 
 /**
  * Compara la posición estructural de cada bloque presente en ambos documentos
- * (tipo del bloque, cadena de contenedores y orden relativo) y devuelve un aviso
- * legible por cada bloque cuyo cambio no se recoge como sugerencia. Insertar,
+ * (tipo del bloque, cadena de contenedores y orden relativo) y devuelve, en orden
+ * de documento de la copia, un aviso legible por cada bloque que cambió. Insertar,
  * eliminar o editar bloques no produce avisos. Un bloque movido hacia un
  * contenedor posterior puede arrastrar también a sus nuevos vecinos.
  */
-export function detectarCambiosEstructura(base: DocJSON, copia: DocJSON): string[] {
+function analizarEstructura(base: DocJSON, copia: DocJSON): { bid: string; aviso: string }[] {
   const ub = ubicar(base);
   const uc = ubicar(copia);
   const comunesBase = [...ub.keys()].filter((b) => uc.has(b));
@@ -113,6 +115,83 @@ export function detectarCambiosEstructura(base: DocJSON, copia: DocJSON): string
     for (const bid of c.value) avisos.set(bid, `El bloque ${nombre(bid)} cambió de orden respecto de los bloques vecinos.`);
   }
 
-  // En orden de documento de la copia.
-  return comunesCopia.filter((b) => avisos.has(b)).map((b) => avisos.get(b) as string);
+  return comunesCopia.filter((b) => avisos.has(b)).map((bid) => ({ bid, aviso: avisos.get(bid) as string }));
+}
+
+/** Bids conservados (en base y copia) cuyo tipo, contenedor u orden relativo cambió. */
+export function bidsMovidos(base: DocJSON, copia: DocJSON): Set<string> {
+  return new Set(analizarEstructura(base, copia).map((a) => a.bid));
+}
+
+/** Un aviso legible por cada bloque de `bidsMovidos`, en orden de documento de la copia. */
+export function detectarCambiosEstructura(base: DocJSON, copia: DocJSON): string[] {
+  return analizarEstructura(base, copia).map((a) => a.aviso);
+}
+
+/**
+ * Bids cubiertos por un par completo de `sugerencias`: un `bloque-eliminado` del bid
+ * con `grupo` y un `bloque-insertado` del mismo autor y grupo.
+ */
+export function bidsCubiertos(sugerencias: Sugerencia[]): Set<string> {
+  const clave = (s: Sugerencia) => claveGrupo(s) as string;
+  const conInsercion = new Set(
+    sugerencias.filter((s) => s.grupo !== undefined && s.tipo === 'bloque-insertado').map(clave),
+  );
+  return new Set(
+    sugerencias
+      .filter((s) => s.grupo !== undefined && s.tipo === 'bloque-eliminado' && conInsercion.has(clave(s)))
+      .map((s) => s.bloqueId),
+  );
+}
+
+/**
+ * Avisos de `detectarCambiosEstructura` cuyos bloques no quedan cubiertos por un par
+ * de `sugerencias` (que deben ser del mismo laboratorio que `copia`).
+ */
+export function avisosNoCubiertos(base: DocJSON, copia: DocJSON, sugerencias: Sugerencia[]): string[] {
+  const cubiertos = bidsCubiertos(sugerencias);
+  return analizarEstructura(base, copia)
+    .filter((a) => !cubiertos.has(a.bid))
+    .map((a) => a.aviso);
+}
+
+/** Cadena de ancestros (sin `doc`) e índice del bloque con ese bid, o null. */
+function ubicarConIndice(doc: DocJSON, bid: string): { ancestros: DocJSON[]; padre: DocJSON } | null {
+  let res: { ancestros: DocJSON[]; padre: DocJSON } | null = null;
+  const visitar = (n: DocJSON, ancestros: DocJSON[]) => {
+    if (res) return;
+    for (const h of n.content ?? []) {
+      if (esBloque(h)) {
+        if (bidDe(h) === bid) {
+          res = { ancestros, padre: n };
+          return;
+        }
+        continue;
+      }
+      visitar(h, [...ancestros, h]);
+      if (res) return;
+    }
+  };
+  visitar(doc, []);
+  return res;
+}
+
+/**
+ * «unido» si el bloque pasó a ser hijo del ítem anterior al suyo, en el mismo nivel
+ * de lista (lo que hace Backspace al inicio de un ítem); si no, «movido».
+ */
+export function tipoMovimiento(base: DocJSON, copia: DocJSON, bid: string): 'movido' | 'unido' {
+  const b = ubicarConIndice(base, bid);
+  const c = ubicarConIndice(copia, bid);
+  if (!b || !c || b.padre.type !== 'item' || c.padre.type !== 'item') return 'movido';
+  if (b.ancestros.length !== c.ancestros.length) return 'movido';
+  const listaBase = b.ancestros[b.ancestros.length - 2];
+  const i = listaBase?.content?.indexOf(b.padre) ?? -1;
+  const anterior = i > 0 ? listaBase?.content?.[i - 1] : undefined;
+  const primero = (it: DocJSON | undefined) => {
+    const p = it?.content?.[0];
+    return p && esBloque(p) ? bidDe(p) : null;
+  };
+  const clave = primero(anterior);
+  return clave !== null && clave !== bid && clave === primero(c.padre) ? 'unido' : 'movido';
 }

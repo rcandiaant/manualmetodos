@@ -1,8 +1,8 @@
 import type { ContentMatch, NodeType } from '@tiptap/pm/model';
 import { esquemaManual } from '../esquema/esquema';
 import type { DocJSON, Sugerencia } from '../tipos';
-import { detectarConflictos } from './conflictos';
-import { ANCLA_INICIO } from './sugerencias';
+import { claveGrupo, detectarConflictos } from './conflictos';
+import { ANCLA_INICIO, listarBloques } from './sugerencias';
 import { BLOQUES_ATOMICOS, jsonEstable, tokenizarBloque, tokensANodos } from './tokens';
 
 /** Pseudo-bloques de la cabecera: se localizan por tipo, no por attr `bid`. */
@@ -233,11 +233,80 @@ function limpiarVaciados(nodo: DocJSON, eliminadoEn: Map<DocJSON, string>): void
   });
 }
 
+/**
+ * Las aceptadas más los miembros que les faltan de sus grupos (mismo autor y
+ * `grupo`), en el orden de `todas`. Lanza error si un miembro de un grupo con alguna
+ * aceptada está en `rechazadas`: la UI decide los grupos enteros.
+ */
+export function completarGrupo(
+  aceptadas: Sugerencia[],
+  todas: Sugerencia[],
+  rechazadas: Sugerencia[] = [],
+): Sugerencia[] {
+  const grupos = new Set(aceptadas.map(claveGrupo).filter((g): g is string => g !== null));
+  const rechazadasDeGrupo = rechazadas.filter((s) => {
+    const g = claveGrupo(s);
+    return g !== null && grupos.has(g);
+  });
+  if (rechazadasDeGrupo.length > 0) {
+    const r = rechazadasDeGrupo[0];
+    throw new Error(
+      `Grupo decidido a medias (bloque movido «${r.grupo}» del ${r.autor}): ` +
+        `${rechazadasDeGrupo.map((x) => x.id).join(', ')} rechazada(s) y otra parte aceptada. ` +
+        'Acepte o rechace el movimiento entero.',
+    );
+  }
+  const ids = new Set(aceptadas.map((s) => s.id));
+  const faltan = todas.filter((s) => {
+    const g = claveGrupo(s);
+    return g !== null && grupos.has(g) && !ids.has(s.id);
+  });
+  return [...aceptadas, ...faltan];
+}
+
+/**
+ * Cada grupo aceptado debe estar completo: todo bid de la base contenido en sus
+ * inserciones aceptadas tiene su eliminación aceptada (si no, ese bid quedaría
+ * duplicado), y toda eliminación aceptada del grupo está contenida en una inserción
+ * aceptada (si no, el bloque se perdería). Lanza «Grupo incompleto» con lo que falta.
+ */
+function validarGrupos(base: DocJSON, aceptadas: Sugerencia[]): void {
+  const enBase = new Set(listarBloques(base).flatMap((b) => (b.bid !== null ? [b.bid] : [])));
+  const partes = new Map<string, { s: Sugerencia; insertados: Set<string>; eliminados: Set<string> }>();
+  for (const s of aceptadas) {
+    const g = claveGrupo(s);
+    if (g === null) continue;
+    const p = partes.get(g) ?? { s, insertados: new Set<string>(), eliminados: new Set<string>() };
+    if (s.tipo === 'bloque-insertado') {
+      for (const b of listarBloques({ type: 'doc', content: s.propuesta })) {
+        if (b.bid !== null && enBase.has(b.bid)) p.insertados.add(b.bid);
+      }
+    } else if (s.tipo === 'bloque-eliminado') {
+      p.eliminados.add(s.bloqueId);
+    }
+    partes.set(g, p);
+  }
+  for (const { s, insertados, eliminados } of partes.values()) {
+    const sinEliminar = [...insertados].filter((b) => !eliminados.has(b));
+    const sinInsertar = [...eliminados].filter((b) => !insertados.has(b));
+    if (sinEliminar.length === 0 && sinInsertar.length === 0) continue;
+    const faltan = [
+      sinEliminar.length > 0 ? `falta aceptar la eliminación de ${sinEliminar.join(', ')}` : '',
+      sinInsertar.length > 0 ? `falta aceptar la inserción en su lugar nuevo de ${sinInsertar.join(', ')}` : '',
+    ].filter(Boolean);
+    throw new Error(
+      `Grupo incompleto (bloque movido «${s.grupo}» del ${s.autor}): ${faltan.join('; ')}. ` +
+        'Acepte o rechace el movimiento entero.',
+    );
+  }
+}
+
 export function aplicarSugerencias(base: DocJSON, aceptadas: Sugerencia[]): DocJSON {
   const conflictos = detectarConflictos(aceptadas);
   if (conflictos.length > 0) {
     throw new Error(`Sugerencias en conflicto: ${conflictos.map((c) => c.ids.join(', ')).join('; ')}`);
   }
+  validarGrupos(base, aceptadas);
   const res = structuredClone(base);
   if (aceptadas.length === 0) return res;
 
@@ -250,20 +319,35 @@ export function aplicarSugerencias(base: DocJSON, aceptadas: Sugerencia[]): DocJ
     return m;
   };
 
-  // 1) Texto, con los bloques aún intactos (los rangos son de la base).
-  for (const [bid, sugs] of agrupar(['contenido', 'formato'])) editarBloque(res, bid, sugs);
-  // 2) Inserciones, antes de eliminar para que sus anclas sigan existiendo.
   const eliminadas = agrupar(['bloque-eliminado']);
   const bidsEliminados = new Set(eliminadas.keys());
-  for (const [ancla, sugs] of agrupar(['bloque-insertado'])) insertarEnAncla(res, ancla, sugs, bidsEliminados);
-  // 3) Eliminaciones y limpieza de contenedores vaciados.
   const eliminadoEn = new Map<DocJSON, string>();
-  for (const bid of eliminadas.keys()) {
+  const eliminar = (bid: string) => {
     if (TIPO_CABECERA[bid]) throw new Error(`No se puede eliminar la cabecera: ${bid}`);
     const [{ padre, indice }] = buscarBloque(res, bid);
     padre.content?.splice(indice, 1);
-    if (padre.type === 'item' && indice === 0) eliminadoEn.set(padre, bid);
-  }
+    if (padre.type === 'item' && indice === 0) {
+      const grupo = eliminadas.get(bid)?.find((s) => s.grupo !== undefined)?.grupo;
+      eliminadoEn.set(
+        padre,
+        grupo === undefined
+          ? bid
+          : `${bid} (bloque movido «${grupo}»: acepte también el movimiento del contenido que quedaba en su ítem)`,
+      );
+    }
+  };
+  const deGrupo = (sugs: Sugerencia[]) => sugs.some((s) => s.grupo !== undefined);
+
+  // 1) Texto, con los bloques aún intactos (los rangos son de la base).
+  for (const [bid, sugs] of agrupar(['contenido', 'formato'])) editarBloque(res, bid, sugs);
+  // 2) Eliminaciones de bloques movidos, antes de reinsertarlos con el mismo bid (si no,
+  //    habría dos bloques con ese bid). Un bloque movido nunca es ancla ni `siguiente`
+  //    de una inserción de su autor; si lo es de otro autor, `detectarConflictos` ya choca.
+  for (const [bid, sugs] of eliminadas) if (deGrupo(sugs)) eliminar(bid);
+  // 3) Inserciones, antes de las demás eliminaciones para que sus anclas sigan existiendo.
+  for (const [ancla, sugs] of agrupar(['bloque-insertado'])) insertarEnAncla(res, ancla, sugs, bidsEliminados);
+  // 4) Demás eliminaciones y limpieza de contenedores vaciados.
+  for (const [bid, sugs] of eliminadas) if (!deGrupo(sugs)) eliminar(bid);
   // Tras todas las eliminaciones: si el mismo autor vació el item entero, no hay error.
   if (eliminadas.size > 0) limpiarVaciados(res, eliminadoEn);
   return res;

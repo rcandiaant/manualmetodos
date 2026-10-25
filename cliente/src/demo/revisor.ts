@@ -1,7 +1,7 @@
 import { Editor } from '@tiptap/core';
-import { aplicarSugerencias } from '../cambios/aplicar';
-import { detectarConflictos, type Conflicto } from '../cambios/conflictos';
-import { detectarCambiosEstructura } from '../cambios/estructura';
+import { aplicarSugerencias, completarGrupo } from '../cambios/aplicar';
+import { claveGrupo, detectarConflictos, type Conflicto } from '../cambios/conflictos';
+import { avisosNoCubiertos, tipoMovimiento } from '../cambios/estructura';
 import { ANCLA_INICIO, calcularSugerencias, listarBloques } from '../cambios/sugerencias';
 import { validarDocumento } from '../esquema/esquema';
 import { exportarLatex } from '../latex/exportar';
@@ -9,13 +9,29 @@ import type { DocJSON, Sugerencia } from '../tipos';
 import { LABS, LETRA_LAB, NOMBRE_LAB, type ContextoModo, type Decision, type Lab, type Modo } from './almacen';
 import { claveDecoraciones, decoracionesRevisor } from './decoraciones';
 import { extensionesDemo } from './editor';
-import { NOMBRE_TIPO, boton, cajaAvisosEstructura, cajaError, el, mensajeDe, resaltar, resumenCambio } from './ui';
+import {
+  NOMBRE_MOVIMIENTO,
+  NOMBRE_TIPO,
+  bidDeGrupo,
+  boton,
+  cajaAvisosEstructura,
+  cajaError,
+  el,
+  mensajeDe,
+  resaltar,
+  resumenUnidad,
+  unidades,
+  type Unidad,
+} from './ui';
 
 const esLab = (autor: string): autor is Lab => (LABS as string[]).includes(autor);
 const claseAutor = (autor: string) => `autor-${autor}`;
 
-/** Tarjeta de una sugerencia suelta o grupo de sugerencias en conflicto. */
-type Entrada = { tipo: 'suelta'; s: Sugerencia } | { tipo: 'conflicto'; c: Conflicto; sugs: Sugerencia[] };
+/**
+ * Tarjeta de una unidad (sugerencia suelta o bloque movido: par con el mismo grupo,
+ * que se decide entero) o de un grupo de sugerencias en conflicto.
+ */
+type Entrada = { tipo: 'suelta'; u: Unidad } | { tipo: 'conflicto'; c: Conflicto; sugs: Sugerencia[] };
 
 /**
  * Modo revisor: la base (solo lectura) con las sugerencias de todos los laboratorios
@@ -53,7 +69,7 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
     ctx.guardar();
   }
 
-  // I1: cambios de estructura de cada laboratorio que no se recogen como sugerencia.
+  // I1: cambios de estructura de cada laboratorio que no quedan cubiertos por un par movido.
   const avisosEstructura = el('div', { class: 'aviso aviso-estructura', role: 'status' });
   avisosEstructura.hidden = true;
 
@@ -61,12 +77,19 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
   let sugerencias: Sugerencia[] = [];
   let conflictos: Conflicto[] = [];
   const avisosPorLab: string[] = [];
+  /** «Movido» o «Unido al ítem anterior» por autor y grupo. */
+  const nombreGrupo = new Map<string, string>();
+  const claveNombre = (s: Sugerencia) => claveGrupo(s) ?? s.id;
   try {
     for (const lab of LABS) {
       const copia = estado.copias[lab];
       if (!copia) continue;
-      for (const a of detectarCambiosEstructura(base, copia)) avisosPorLab.push(`${NOMBRE_LAB[lab]}: ${a}`);
-      for (const s of calcularSugerencias(base, copia, lab)) {
+      const deLab = calcularSugerencias(base, copia, lab);
+      for (const a of avisosNoCubiertos(base, copia, deLab)) avisosPorLab.push(`${NOMBRE_LAB[lab]}: ${a}`);
+      for (const s of deLab) {
+        if (s.grupo !== undefined && !nombreGrupo.has(claveNombre(s))) {
+          nombreGrupo.set(claveNombre(s), NOMBRE_MOVIMIENTO[tipoMovimiento(base, copia, bidDeGrupo(s.grupo))]);
+        }
         const motivo = estado.motivos[lab][s.id];
         sugerencias.push(motivo ? { ...s, motivo } : s);
       }
@@ -75,7 +98,7 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
     cajaAvisosEstructura(
       avisosEstructura,
       avisosPorLab,
-      'Cambios de estructura de los laboratorios que NO se aplicarán (unir ítems, mover o reordenar bloques). ' +
+      'Cambios de estructura de los laboratorios que NO se aplicarán (no se pudieron recoger como bloque movido). ' +
         'Si corresponde, rehágalos a mano en el .tex exportado o pida al laboratorio que los proponga como eliminación + bloque nuevo:',
     );
   } catch (e) {
@@ -94,10 +117,14 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
   for (const c of conflictos) for (const id of c.ids) enConflicto.set(id, c);
   const entradas: Entrada[] = [];
   const vistos = new Set<Conflicto>();
+  // Unidades sin conflicto, por el id de su primer miembro (en orden de documento).
+  const unidadDe = new Map(unidades(sugerencias.filter((s) => !enConflicto.has(s.id))).map((u) => [u.sugs[0].id, u] as const));
   for (const s of sugerencias) {
     const c = enConflicto.get(s.id);
-    if (!c) entradas.push({ tipo: 'suelta', s });
-    else if (!vistos.has(c)) {
+    if (!c) {
+      const u = unidadDe.get(s.id); // solo en el primer miembro de cada unidad
+      if (u) entradas.push({ tipo: 'suelta', u });
+    } else if (!vistos.has(c)) {
       vistos.add(c);
       entradas.push({ tipo: 'conflicto', c, sugs: sugerencias.filter((x) => c.ids.includes(x.id)) });
     }
@@ -127,13 +154,16 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
     );
   }
 
-  function detalle(s: Sugerencia): HTMLElement {
+  function detalle(u: Unidad): HTMLElement {
+    const s = u.principal;
+    const etiqueta = s.grupo !== undefined ? (nombreGrupo.get(claveNombre(s)) ?? NOMBRE_MOVIMIENTO.movido) : NOMBRE_TIPO[s.tipo];
+    const motivo = u.sugs.find((x) => x.motivo)?.motivo;
     return el(
       'div',
       { class: `detalle ${claseAutor(s.autor)}`, 'data-sug': s.id },
-      el('div', { class: 'tarjeta-cabeza' }, chipAutor(s.autor), el('span', { class: 'etiqueta-tipo' }, NOMBRE_TIPO[s.tipo])),
-      resumenCambio(s),
-      s.motivo ? el('p', { class: 'motivo-leido' }, `Motivo: ${s.motivo}`) : null,
+      el('div', { class: 'tarjeta-cabeza' }, chipAutor(s.autor), el('span', { class: 'etiqueta-tipo' }, etiqueta)),
+      resumenUnidad(u),
+      motivo ? el('p', { class: 'motivo-leido' }, `Motivo: ${motivo}`) : null,
     );
   }
 
@@ -145,13 +175,14 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
 
   function tarjeta(e: Entrada): HTMLLIElement {
     if (e.tipo === 'suelta') {
-      const { s } = e;
-      const d = decisiones[s.id];
-      const alternar = (v: Decision) => decidir([[s.id, d === v ? undefined : v]]);
+      const { u } = e;
+      // Un solo Aceptar/Rechazar para toda la unidad (los dos miembros de un bloque movido).
+      const d = decisiones[u.principal.id];
+      const alternar = (v: Decision) => decidir(u.sugs.map((x) => [x.id, d === v ? undefined : v] as [string, Decision | undefined]));
       return el(
         'li',
         { class: `tarjeta ${d ? `decision-${d}` : ''}` },
-        detalle(s),
+        detalle(u),
         el(
           'div',
           { class: 'botones' },
@@ -171,7 +202,7 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
       'li',
       { class: `tarjeta conflicto ${resuelto ? 'resuelto' : ''}` },
       el('div', { class: 'titulo-conflicto' }, resuelto ? 'Conflicto resuelto' : 'Conflicto: elija una propuesta'),
-      ...sugs.map(detalle),
+      ...unidades(sugs).map(detalle),
       el(
         'div',
         { class: 'botones' },
@@ -200,16 +231,22 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
         el('li', { class: 'vacio' }, 'No hay sugerencias. Los laboratorios deben editar su copia y pulsar «Guardar copia».'),
       );
     }
-    const aceptadas = sugerencias.filter((s) => decisiones[s.id] === 'aceptada').length;
-    const pendientes = sugerencias.filter((s) => !decisiones[s.id]).length;
+    const us = unidades(sugerencias);
+    const aceptadas = us.filter((u) => decisiones[u.principal.id] === 'aceptada').length;
+    const pendientes = us.filter((u) => !decisiones[u.principal.id]).length;
     resumen.textContent =
-      `${sugerencias.length} sugerencias · ${aceptadas} aceptadas · ${pendientes} sin decidir · ` +
+      `${us.length} sugerencias · ${aceptadas} aceptadas · ${pendientes} sin decidir · ` +
       `${conflictos.length} conflicto${conflictos.length === 1 ? '' : 's'}`;
   }
 
   function exportar(): void {
-    const aceptadas = sugerencias.filter((s) => decisiones[s.id] === 'aceptada');
     try {
+      // Un grupo se decide entero; completarGrupo lanza error si quedó decidido a medias.
+      const aceptadas = completarGrupo(
+        sugerencias.filter((s) => decisiones[s.id] === 'aceptada'),
+        sugerencias,
+        sugerencias.filter((s) => decisiones[s.id] === 'rechazada'),
+      );
       const final = aplicarSugerencias(base, aceptadas);
       const v = validarDocumento(final);
       if (!v.ok) throw new Error(`el documento resultante no es válido: ${v.error}`);

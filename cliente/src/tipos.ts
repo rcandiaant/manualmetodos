@@ -36,5 +36,13 @@ export interface Sugerencia {
    * `profundidad`, en vez de tras el ancla.
    */
   primerHijo?: true;
+  /**
+   * Bloque movido o unido (su bid se conserva pero cambió de tipo, contenedor u
+   * orden): par `bloque-eliminado` (lugar original, contenido de la base) +
+   * `bloque-insertado` (lugar nuevo, contenido de la copia, mismo `attrs.bid`) con
+   * el mismo `grupo` = `mov:${bid}`. Las sugerencias de un mismo autor y grupo se
+   * aceptan o rechazan juntas (`completarGrupo`).
+   */
+  grupo?: string;
   motivo?: string;
 }

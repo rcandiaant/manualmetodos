@@ -1,4 +1,5 @@
 import type { DocJSON, Sugerencia, TipoSugerencia } from '../tipos';
+import { claveGrupo } from '../cambios/conflictos';
 import { textoVisible } from './decoraciones';
 
 /** Ayudantes DOM mínimos compartidos por los modos de la demo. */
@@ -33,6 +34,55 @@ export const NOMBRE_TIPO: Record<TipoSugerencia, string> = {
   'bloque-insertado': 'Bloque nuevo',
   'bloque-eliminado': 'Bloque eliminado',
 };
+
+export const NOMBRE_MOVIMIENTO: Record<'movido' | 'unido', string> = {
+  movido: 'Movido',
+  unido: 'Unido al ítem anterior',
+};
+
+/**
+ * Unidad de decisión: una sugerencia suelta o todos los miembros de un grupo (mismo
+ * autor y `grupo`: un bloque movido o unido), que se aceptan o rechazan juntos.
+ */
+export interface Unidad {
+  /** Sugerencia que representa a la unidad (la inserción, en un grupo). */
+  principal: Sugerencia;
+  sugs: Sugerencia[];
+}
+
+/** Agrupa las sugerencias en unidades de decisión, en el orden de su primer miembro. */
+export function unidades(sugerencias: Sugerencia[]): Unidad[] {
+  const res: Unidad[] = [];
+  const porGrupo = new Map<string, Unidad>();
+  for (const s of sugerencias) {
+    const k = claveGrupo(s);
+    if (k === null) {
+      res.push({ principal: s, sugs: [s] });
+      continue;
+    }
+    const u = porGrupo.get(k);
+    if (u) {
+      u.sugs.push(s);
+      if (s.tipo === 'bloque-insertado') u.principal = s;
+    } else {
+      const nueva = { principal: s, sugs: [s] };
+      porGrupo.set(k, nueva);
+      res.push(nueva);
+    }
+  }
+  return res;
+}
+
+/** Bid del bloque movido que nombra el grupo (`mov:${bid}`). */
+export const bidDeGrupo = (grupo: string): string => grupo.replace(/^mov:/, '');
+
+/** Resumen de una unidad: en un grupo, el texto original (base) → el bloque en su lugar nuevo (copia). */
+export function resumenUnidad(u: Unidad): HTMLElement {
+  if (u.sugs.length === 1) return resumenCambio(u.principal);
+  const original = u.sugs.filter((s) => s.tipo === 'bloque-eliminado').flatMap((s) => s.original);
+  const propuesta = u.sugs.filter((s) => s.tipo === 'bloque-insertado').flatMap((s) => s.propuesta);
+  return resumenCambio({ ...u.principal, original, propuesta });
+}
 
 const recortar = (t: string, max = 160) => (t.length > max ? `${t.slice(0, max - 1)}…` : t);
 

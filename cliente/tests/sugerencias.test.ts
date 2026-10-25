@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { aplicarSugerencias, completarGrupo } from '../src/cambios/aplicar';
+import { detectarConflictos } from '../src/cambios/conflictos';
+import { avisosNoCubiertos, detectarCambiosEstructura, tipoMovimiento } from '../src/cambios/estructura';
 import { calcularSugerencias, listarBloques } from '../src/cambios/sugerencias';
 import { tokenizarBloque } from '../src/cambios/tokens';
 import type { DocJSON } from '../src/tipos';
@@ -232,5 +235,140 @@ describe('calcularSugerencias', () => {
     expect(s).toHaveLength(1);
     expect(s[0]).toMatchObject({ tipo: 'contenido', bloqueId: 'e1', base: { desde: 0, hasta: 1 } });
     expect(s[0].propuesta).toEqual([ecuacion('e1', 'x^3')]);
+  });
+});
+
+describe('bloques movidos o unidos (pares con grupo)', () => {
+  const BASE = doc(
+    parrafo('p0', 'Introducción.'),
+    lista(
+      item(null, parrafo('i1', 'Pesar 10 g de suelo.')),
+      item(null, parrafo('i2', 'Disolver 42,0 g de NaCl.')),
+      item(null, parrafo('i3', 'Agitar 5 minutos.')),
+    ),
+    parrafo('p9', 'Leer el pH.'),
+  );
+  /** Backspace al inicio de i2: su contenido pasa al ítem 1. */
+  const unirI2 = (texto2 = 'Disolver 42,0 g de NaCl.') =>
+    doc(
+      parrafo('p0', 'Introducción.'),
+      lista(
+        item(null, parrafo('i1', 'Pesar 10 g de suelo.'), parrafo('i2', texto2)),
+        item(null, parrafo('i3', 'Agitar 5 minutos.')),
+      ),
+      parrafo('p9', 'Leer el pH.'),
+    );
+
+  it('backspace al inicio de un ítem produce un par movido aplicable', () => {
+    const copia = unirI2();
+    const s = calcularSugerencias(BASE, copia, AUTOR);
+    expect(s).toHaveLength(2);
+    const ins = s.find((x) => x.tipo === 'bloque-insertado')!;
+    const eli = s.find((x) => x.tipo === 'bloque-eliminado')!;
+    expect(ins.grupo).toBe('mov:i2');
+    expect(eli.grupo).toBe('mov:i2');
+    expect(eli.bloqueId).toBe('i2');
+    expect(ins.propuesta[0].attrs?.bid).toBe('i2');
+    expect(aplicarSugerencias(BASE, s)).toEqual(copia);
+    expect(detectarCambiosEstructura(BASE, copia)).toHaveLength(1);
+    expect(avisosNoCubiertos(BASE, copia, s)).toEqual([]);
+    expect(tipoMovimiento(BASE, copia, 'i2')).toBe('unido');
+  });
+
+  it('movido y editado conserva la edición en la propuesta', () => {
+    const copia = unirI2('Disolver 42,00 g de NaCl.');
+    const s = calcularSugerencias(BASE, copia, AUTOR);
+    expect(s).toHaveLength(2);
+    const ins = s.find((x) => x.tipo === 'bloque-insertado')!;
+    expect(JSON.stringify(ins.propuesta)).toContain('42,00');
+    expect(aplicarSugerencias(BASE, s)).toEqual(copia);
+  });
+
+  it('reordenar dos ítems produce un par por bloque movido', () => {
+    const copia = doc(
+      parrafo('p0', 'Introducción.'),
+      lista(
+        item(null, parrafo('i2', 'Disolver 42,0 g de NaCl.')),
+        item(null, parrafo('i1', 'Pesar 10 g de suelo.')),
+        item(null, parrafo('i3', 'Agitar 5 minutos.')),
+      ),
+      parrafo('p9', 'Leer el pH.'),
+    );
+    const s = calcularSugerencias(BASE, copia, AUTOR);
+    const grupos = new Set(s.map((x) => x.grupo));
+    expect(grupos.size).toBe(1);
+    expect([...grupos][0]).toMatch(/^mov:i[12]$/);
+    expect(s).toHaveLength(2);
+    expect(aplicarSugerencias(BASE, s)).toEqual(copia);
+    expect(avisosNoCubiertos(BASE, copia, s)).toEqual([]);
+    const bid = [...grupos][0]!.slice(4);
+    expect(tipoMovimiento(BASE, copia, bid)).toBe('movido');
+  });
+
+  it('completarGrupo agrega el miembro faltante', () => {
+    const s = calcularSugerencias(BASE, unirI2(), AUTOR);
+    const ins = s.find((x) => x.tipo === 'bloque-insertado')!;
+    const completas = completarGrupo([ins], s);
+    expect(completas).toHaveLength(2);
+    expect(new Set(completas.map((x) => x.id))).toEqual(new Set(s.map((x) => x.id)));
+    expect(aplicarSugerencias(BASE, completas)).toEqual(unirI2());
+  });
+
+  it('completarGrupo con un miembro rechazado lanza error', () => {
+    const s = calcularSugerencias(BASE, unirI2(), AUTOR);
+    const ins = s.find((x) => x.tipo === 'bloque-insertado')!;
+    const eli = s.find((x) => x.tipo === 'bloque-eliminado')!;
+    expect(() => completarGrupo([ins], s, [eli])).toThrow(/grupo/i);
+  });
+
+  it('aceptar solo una mitad del par lanza error visible', () => {
+    const s = calcularSugerencias(BASE, unirI2(), AUTOR);
+    const eli = s.find((x) => x.tipo === 'bloque-eliminado')!;
+    expect(() => aplicarSugerencias(BASE, [eli])).toThrow(/grupo/i);
+  });
+
+  it('un grupo parcial (ítem con sublista movido) lanza error y el grupo completo reproduce la copia', () => {
+    const base = doc(
+      lista(
+        item(null, parrafo('a1', 'a')),
+        item(null, parrafo('x1', 'x'), lista(item(null, parrafo('s1', 's')))),
+      ),
+      lista(item(null, parrafo('b1', 'b'))),
+    );
+    const copia = doc(
+      lista(item(null, parrafo('a1', 'a'))),
+      lista(item(null, parrafo('b1', 'b')), item(null, parrafo('x1', 'x'), lista(item(null, parrafo('s1', 's'))))),
+    );
+    const s = calcularSugerencias(base, copia, AUTOR);
+    const grupo = s.find((x) => x.tipo === 'bloque-insertado')!.grupo!;
+    const miembros = s.filter((x) => x.grupo === grupo);
+    const ins = miembros.filter((x) => x.tipo === 'bloque-insertado');
+    const elis = miembros.filter((x) => x.tipo === 'bloque-eliminado');
+    expect(ins).toHaveLength(1);
+    expect(elis.map((x) => x.bloqueId).sort()).toEqual(['b1', 's1', 'x1']);
+    const s1 = elis.find((x) => x.bloqueId === 's1')!;
+    expect(() => aplicarSugerencias(base, [...ins, s1])).toThrow(/Grupo incompleto.*b1.*x1/);
+    expect(() => aplicarSugerencias(base, [s1])).toThrow(/Grupo incompleto.*s1/);
+    expect(aplicarSugerencias(base, miembros)).toEqual(copia);
+    expect(aplicarSugerencias(base, s)).toEqual(copia);
+  });
+
+  it('un grupo choca si choca cualquiera de sus miembros', () => {
+    const a = calcularSugerencias(BASE, unirI2(), 'labA');
+    const editada = structuredClone(BASE);
+    editada.content![3].content![1].content![0] = parrafo('i2', 'Disolver 42,00 g de NaCl.');
+    const b = calcularSugerencias(BASE, editada, 'labB');
+    expect(b).toHaveLength(1);
+    const conflictos = detectarConflictos([...a, ...b]);
+    expect(conflictos).toHaveLength(1);
+    expect(new Set(conflictos[0].ids)).toEqual(new Set([...a, ...b].map((x) => x.id)));
+  });
+
+  it('dos autores que mueven el mismo bloque no comparten grupo', () => {
+    const a = calcularSugerencias(BASE, unirI2(), 'labA');
+    const b = calcularSugerencias(BASE, unirI2(), 'labB');
+    const insA = a.find((x) => x.tipo === 'bloque-insertado')!;
+    // labA completo; labB sin aceptar: completarGrupo no mezcla autores.
+    expect(completarGrupo([insA], [...a, ...b]).map((x) => x.autor)).toEqual(['labA', 'labA']);
   });
 });

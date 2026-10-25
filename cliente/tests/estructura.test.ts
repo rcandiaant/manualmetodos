@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectarCambiosEstructura } from '../src/cambios/estructura';
+import { aplicarSugerencias } from '../src/cambios/aplicar';
+import { avisosNoCubiertos, bidsMovidos, detectarCambiosEstructura, tipoMovimiento } from '../src/cambios/estructura';
 import { calcularSugerencias } from '../src/cambios/sugerencias';
 import type { DocJSON } from '../src/tipos';
 import { doc, ecuacion, item, lista, parrafo } from './ayudantes-doc';
@@ -25,12 +26,53 @@ describe('detectarCambiosEstructura (I1)', () => {
     expect(detectarCambiosEstructura(BASE, structuredClone(BASE))).toEqual([]);
   });
 
-  it('Backspace al inicio de un ítem (lo une al anterior) da aviso y 0 sugerencias', () => {
+  it('bidsMovidos da los bids de los avisos', () => {
+    expect(bidsMovidos(BASE, structuredClone(BASE))).toEqual(new Set());
+    const copia = structuredClone(BASE);
+    const [it1, it2] = items(copia);
+    it1.content!.push(it2.content!.pop()!); // i2b al final del ítem 1
+    expect(bidsMovidos(BASE, copia)).toEqual(new Set(['i2b']));
+    const c = copia.content!;
+    c.splice(2, 0, ...c.splice(4, 1)); // y la ecuación antes de p0
+    expect(bidsMovidos(BASE, copia)).toEqual(new Set(['i2b', 'e1']));
+  });
+
+  it('avisosNoCubiertos conserva los avisos sin par completo', () => {
+    const copia = structuredClone(BASE);
+    const c = copia.content!;
+    c.splice(2, 0, ...c.splice(4, 1)); // ecuación antes de p0
+    const sugs = calcularSugerencias(BASE, copia, AUTOR);
+    expect(avisosNoCubiertos(BASE, copia, sugs)).toEqual([]);
+    expect(tipoMovimiento(BASE, copia, 'e1')).toBe('movido');
+    const sinInsercion = sugs.filter((s) => s.tipo !== 'bloque-insertado');
+    expect(avisosNoCubiertos(BASE, copia, sinInsercion)).toEqual(detectarCambiosEstructura(BASE, copia));
+    expect(avisosNoCubiertos(BASE, copia, [])).toHaveLength(1);
+  });
+
+  it('cambio de tipo con el mismo bid es un par aplicable', () => {
+    const copia = structuredClone(BASE);
+    copia.content![2] = { type: 'seccion', attrs: { bid: 'p0' }, content: copia.content![2].content };
+    const sugs = calcularSugerencias(BASE, copia, AUTOR);
+    expect(sugs.every((s) => s.grupo === 'mov:p0')).toBe(true);
+    expect(aplicarSugerencias(BASE, sugs)).toEqual(copia);
+  });
+
+  it('Backspace al inicio de un ítem (lo une al anterior) da aviso y un par por bloque movido', () => {
     const copia = structuredClone(BASE);
     const [it1, it2] = items(copia);
     it1.content!.push(...it2.content!); // joinBackward: item1 = [i1, i2, i2b]
     items(copia).splice(1, 1);
-    expect(calcularSugerencias(BASE, copia, AUTOR)).toEqual([]);
+    const sugs = calcularSugerencias(BASE, copia, AUTOR);
+    expect(sugs.map((s) => [s.tipo, s.grupo]).sort()).toEqual([
+      ['bloque-eliminado', 'mov:i2'],
+      ['bloque-eliminado', 'mov:i2b'],
+      ['bloque-insertado', 'mov:i2'],
+      ['bloque-insertado', 'mov:i2b'],
+    ]);
+    expect(aplicarSugerencias(BASE, sugs)).toEqual(copia);
+    expect(avisosNoCubiertos(BASE, copia, sugs)).toEqual([]);
+    expect(tipoMovimiento(BASE, copia, 'i2')).toBe('unido');
+    expect(tipoMovimiento(BASE, copia, 'i2b')).toBe('unido');
     const avisos = detectarCambiosEstructura(BASE, copia);
     expect(avisos).toHaveLength(2); // i2 e i2b cambiaron de ítem; i1 no
     expect(avisos[0]).toContain('Agregar 25 mL de agua.');

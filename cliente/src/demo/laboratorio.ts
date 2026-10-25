@@ -1,11 +1,24 @@
 import { Editor } from '@tiptap/core';
-import { detectarCambiosEstructura } from '../cambios/estructura';
+import { avisosNoCubiertos, tipoMovimiento } from '../cambios/estructura';
 import { calcularSugerencias } from '../cambios/sugerencias';
 import type { DocJSON, Sugerencia } from '../tipos';
 import { NOMBRE_LAB, descartarCopia, guardarCopia, type ContextoModo, type Lab, type Modo } from './almacen';
 import { claveDecoraciones, decoracionesDeCambios } from './decoraciones';
 import { extensionesDemo } from './editor';
-import { NOMBRE_TIPO, boton, cajaAvisosEstructura, cajaError, el, mensajeDe, resaltar, resumenCambio } from './ui';
+import {
+  NOMBRE_MOVIMIENTO,
+  NOMBRE_TIPO,
+  bidDeGrupo,
+  boton,
+  cajaAvisosEstructura,
+  cajaError,
+  el,
+  mensajeDe,
+  resaltar,
+  resumenUnidad,
+  unidades,
+  type Unidad,
+} from './ui';
 
 const ESPERA_MS = 300;
 
@@ -39,6 +52,8 @@ export function montarLaboratorio(contenedor: HTMLElement, ctx: ContextoModo, la
 
   let editor: Editor;
   let sugerencias: Sugerencia[] = [];
+  /** «Movido» o «Unido al ítem anterior» de cada grupo, según la copia actual. */
+  let nombreGrupo = new Map<string, string>();
   let avisos: string[] = [];
   let sinGuardar = false;
   let temporizador: number | undefined;
@@ -71,7 +86,10 @@ export function montarLaboratorio(contenedor: HTMLElement, ctx: ContextoModo, la
     marcarSinGuardar(false);
   };
 
-  function tarjeta(s: Sugerencia, i: number): HTMLLIElement {
+  /** Una tarjeta por unidad: un bloque movido (par con grupo) es una sola tarjeta, con su motivo en la inserción. */
+  function tarjeta(u: Unidad, i: number): HTMLLIElement {
+    const s = u.principal;
+    const etiqueta = s.grupo !== undefined ? (nombreGrupo.get(s.grupo) ?? NOMBRE_MOVIMIENTO.movido) : NOMBRE_TIPO[s.tipo];
     const motivo = el('input', {
       type: 'text',
       class: 'motivo',
@@ -86,9 +104,9 @@ export function montarLaboratorio(contenedor: HTMLElement, ctx: ContextoModo, la
     });
     const li = el(
       'li',
-      { class: `tarjeta tipo-${s.tipo}`, 'data-sug': s.id },
-      el('div', { class: 'tarjeta-cabeza' }, el('span', { class: 'etiqueta-tipo' }, NOMBRE_TIPO[s.tipo])),
-      resumenCambio(s),
+      { class: `tarjeta tipo-${s.grupo !== undefined ? 'movido' : s.tipo}`, 'data-sug': s.id },
+      el('div', { class: 'tarjeta-cabeza' }, el('span', { class: 'etiqueta-tipo' }, etiqueta)),
+      resumenUnidad(u),
       motivo,
     );
     li.addEventListener('click', (ev) => {
@@ -102,24 +120,32 @@ export function montarLaboratorio(contenedor: HTMLElement, ctx: ContextoModo, la
       const doc = editor.state.doc;
       const copia = doc.toJSON() as DocJSON;
       sugerencias = calcularSugerencias(base, copia, lab);
-      avisos = detectarCambiosEstructura(base, copia);
+      nombreGrupo = new Map();
+      for (const s of sugerencias) {
+        if (s.grupo !== undefined && !nombreGrupo.has(s.grupo)) {
+          nombreGrupo.set(s.grupo, NOMBRE_MOVIMIENTO[tipoMovimiento(base, copia, bidDeGrupo(s.grupo))]);
+        }
+      }
+      // Los cambios de estructura cubiertos por un par (movido/unido) ya son sugerencias.
+      avisos = avisosNoCubiertos(base, copia, sugerencias);
       const set = decoracionesDeCambios(doc, sugerencias, base);
       editor.view.dispatch(editor.state.tr.setMeta(claveDecoraciones, set).setMeta('addToHistory', false));
       cajaError(error, null);
     } catch (e) {
       cajaError(error, `no se pudieron calcular las sugerencias: ${mensajeDe(e)}`);
     }
+    const us = unidades(sugerencias);
     contador.textContent =
-      `${sugerencias.length} sugerencia${sugerencias.length === 1 ? '' : 's'}` +
+      `${us.length} sugerencia${us.length === 1 ? '' : 's'}` +
       (avisos.length > 0 ? ` · ${avisos.length} cambio${avisos.length === 1 ? '' : 's'} de estructura sin aplicar` : '');
     cajaAvisosEstructura(
       avisosEstructura,
       avisos,
-      'Cambios de estructura que no se aplicarán. Unir ítems, mover o reordenar bloques no se recoge como sugerencia: ' +
+      'Cambios de estructura que no se aplicarán (no se pudieron recoger como bloque movido): ' +
         'deshágalo (Ctrl+Z) y, si hace falta, proponga el cambio eliminando el bloque y escribiéndolo de nuevo donde corresponde, ' +
         'o explíquelo en el motivo de otra sugerencia.',
     );
-    lista.replaceChildren(...sugerencias.map(tarjeta));
+    lista.replaceChildren(...us.map(tarjeta));
     if (sugerencias.length === 0) {
       lista.append(
         el(
