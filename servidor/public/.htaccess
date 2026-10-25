@@ -1,0 +1,18 @@
+Options -Indexes
+
+<IfModule mod_headers.c>
+    # La API ya emite sus propias cabeceras desde PHP; evita duplicarlas.
+    SetEnvIf Request_URI "^/api/" es_api
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" env=!REDIRECT_es_api
+    Header always set X-Content-Type-Options "nosniff" env=!REDIRECT_es_api
+    Header always set Referrer-Policy "same-origin" env=!REDIRECT_es_api
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()" env=!REDIRECT_es_api
+    Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on' && -z %{ENV:REDIRECT_es_api}"
+</IfModule>
+
+<FilesMatch "(\.(env|sql|lock)|^composer\.json)$">
+    Require all denied
+</FilesMatch>
+
+RewriteEngine On
+RewriteRule ^api/ index.php [L,QSA]

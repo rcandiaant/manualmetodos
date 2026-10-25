@@ -14,6 +14,8 @@ services:
       BD_NOMBRE_PRUEBAS: manual_pruebas
       BD_USUARIO: manual
       BD_CLAVE: manual_dev
+      CLAVE_CIFRADO: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+      CLAVE_INDICE: YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=
     depends_on:
       bd:
         condition: service_healthy
