@@ -34,11 +34,12 @@ CREATE TABLE IF NOT EXISTS capitulos (
   UNIQUE KEY uq_capitulos_slug (slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- tex_original: obligatorio en versiones base (lo exige PHP), NULL en las finales.
 CREATE TABLE IF NOT EXISTS versiones_capitulo (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   capitulo_id INT UNSIGNED NOT NULL,
   tipo ENUM('base','final') NOT NULL,
-  tex_original LONGTEXT NOT NULL,
+  tex_original LONGTEXT NULL,
   doc_json LONGTEXT NOT NULL,
   tex_final LONGTEXT NULL,
   creado_por INT UNSIGNED NULL,
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS revisiones_copia (
   creado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY ix_revisiones_usuario_capitulo (usuario_id, capitulo_id, creado),
+  KEY ix_revisiones_creado (creado),
   CONSTRAINT fk_revisiones_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
   CONSTRAINT fk_revisiones_capitulo FOREIGN KEY (capitulo_id) REFERENCES capitulos (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -144,9 +146,11 @@ CREATE TABLE IF NOT EXISTS auditoria (
   KEY ix_auditoria_usuario (usuario_id, creado)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- intentos_login: claves ip:<ip> y cuenta:<indice hex>. bloqueos = nivel de bloqueo progresivo alcanzado.
 CREATE TABLE IF NOT EXISTS intentos_login (
   clave VARCHAR(190) NOT NULL,
   fallos INT UNSIGNED NOT NULL DEFAULT 0,
+  bloqueos INT UNSIGNED NOT NULL DEFAULT 0,
   bloqueado_hasta DATETIME NULL,
   actualizado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (clave),

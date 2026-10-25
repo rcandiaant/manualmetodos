@@ -42,6 +42,7 @@ final class ConfigTest extends TestCase
             ['CLAVE_CIFRADO' => $buena],
             ['CLAVE_CIFRADO' => $buena, 'CLAVE_INDICE' => 'no-es-base64!!'],
             ['CLAVE_CIFRADO' => $buena, 'CLAVE_INDICE' => base64_encode('corta')],
+            ['CLAVE_CIFRADO' => $buena, 'CLAVE_INDICE' => $buena], // deben ser distintas
         ] as $valores) {
             try {
                 Config::desdeArreglo($valores);

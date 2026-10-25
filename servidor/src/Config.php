@@ -53,12 +53,17 @@ final class Config
         if ($dsn === '' && isset($v['BD_HOST'], $v['BD_NOMBRE'])) {
             $dsn = "mysql:host={$v['BD_HOST']};dbname={$v['BD_NOMBRE']};charset=utf8mb4";
         }
+        $cifrado = self::clave($v, 'CLAVE_CIFRADO');
+        $indice = self::clave($v, 'CLAVE_INDICE');
+        if (hash_equals($cifrado, $indice)) {
+            throw new \InvalidArgumentException('CLAVE_CIFRADO y CLAVE_INDICE deben ser distintas.');
+        }
         return new self(
             $dsn,
             $v['BD_USUARIO'] ?? '',
             $v['BD_CLAVE'] ?? '',
-            self::clave($v, 'CLAVE_CIFRADO'),
-            self::clave($v, 'CLAVE_INDICE'),
+            $cifrado,
+            $indice,
             ($v['COOKIE_SEGURA'] ?? '0') === '1',
             ($v['ZONA_HORARIA'] ?? '') !== '' ? $v['ZONA_HORARIA'] : 'America/Santiago',
         );

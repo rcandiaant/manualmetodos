@@ -65,6 +65,18 @@ final class Peticion
         return $this->cabeceras[strtolower($nombre)] ?? null;
     }
 
+    /** Valor de la cookie $nombre de la cabecera Cookie (sin decodificar), o null si no viene. */
+    public function cookie(string $nombre): ?string
+    {
+        foreach (explode(';', $this->cabecera('cookie') ?? '') as $par) {
+            $partes = explode('=', trim($par), 2);
+            if (count($partes) === 2 && $partes[0] === $nombre) {
+                return $partes[1];
+            }
+        }
+        return null;
+    }
+
     /** @return array<string,mixed> */
     public function json(): array
     {

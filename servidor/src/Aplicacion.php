@@ -4,18 +4,41 @@ declare(strict_types=1);
 
 namespace Manual;
 
+use Manual\Acceso\Auditoria;
+use Manual\Acceso\Usuarios;
+use Manual\Bd\Conexion;
+use Manual\Controladores\SesionCtl;
 use Manual\Http\Enrutador;
 use Manual\Http\ErrorHttp;
 use Manual\Http\Peticion;
 use Manual\Http\Respuesta;
+use Manual\Seguridad\AlmacenSesion;
+use Manual\Seguridad\AlmacenSesionNativa;
 use Manual\Seguridad\Cabeceras;
+use Manual\Seguridad\Cifrado;
+use Manual\Seguridad\Csrf;
+use Manual\Seguridad\LimiteIntentos;
+use Manual\Seguridad\PoliticaPeticion;
+use Manual\Seguridad\Sesion;
 
+/**
+ * Arma las dependencias y atiende una petición a la vez.
+ * La base y el almacén de sesiones se crean al primer uso: las rutas que no los necesitan no conectan.
+ */
 final class Aplicacion
 {
     private readonly Enrutador $enrutador;
+    private readonly Reloj $reloj;
+    private ?Peticion $peticion = null;
+    private ?Sesion $sesion = null;
 
-    public function __construct(private readonly Config $config)
-    {
+    public function __construct(
+        private readonly Config $config,
+        ?Reloj $reloj = null,
+        private ?AlmacenSesion $almacenSesion = null,
+        private ?\PDO $bd = null,
+    ) {
+        $this->reloj = $reloj ?? new RelojSistema();
         $this->enrutador = new Enrutador();
         $this->registrarRutas();
     }
@@ -25,10 +48,64 @@ final class Aplicacion
         return $this->enrutador;
     }
 
+    /** Sesión de la petición en curso (solo válido dentro de manejar()). */
+    public function sesion(): Sesion
+    {
+        if ($this->peticion === null) {
+            throw new \LogicException('No hay una petición en curso.');
+        }
+        return $this->sesion ??= new Sesion(
+            $this->almacenSesion ??= new AlmacenSesionNativa($this->config->cookieSegura),
+            $this->reloj,
+            fn (): Usuarios => $this->usuarios(),
+            $this->config->cookieSegura,
+            $this->peticion->cookie(Sesion::nombreCookie($this->config->cookieSegura)),
+        );
+    }
+
     /** Único lugar donde se registran las rutas de la API. */
     private function registrarRutas(): void
     {
         $this->enrutador->agregar('GET', '/api/salud', fn () => Respuesta::json(200, ['estado' => 'ok']));
+
+        $this->ruta('POST', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->entrar($p), exentoCsrf: true);
+        $this->ruta('GET', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->actual($p));
+        $this->ruta('DELETE', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->salir($p));
+    }
+
+    /**
+     * Registra una ruta que exige CSRF en todo método distinto de GET/HEAD.
+     * Solo el login (POST /api/sesion) va exento.
+     * @param callable(Peticion, array<string,string>): Respuesta $manejador
+     */
+    private function ruta(string $metodo, string $patron, callable $manejador, bool $exentoCsrf = false): void
+    {
+        $this->enrutador->agregar($metodo, $patron, function (Peticion $p, array $params) use ($manejador, $exentoCsrf): Respuesta {
+            if (!$exentoCsrf) {
+                (new Csrf($this->sesion()))->verificar($p);
+            }
+            return $manejador($p, $params);
+        });
+    }
+
+    private function bd(): \PDO
+    {
+        return $this->bd ??= Conexion::crear($this->config);
+    }
+
+    private function usuarios(): Usuarios
+    {
+        return new Usuarios($this->bd(), new Cifrado($this->config->claveCifrado, $this->config->claveIndice));
+    }
+
+    private function auditoria(): Auditoria
+    {
+        return new Auditoria($this->bd(), $this->reloj);
+    }
+
+    private function sesionCtl(): SesionCtl
+    {
+        return new SesionCtl($this->sesion(), $this->usuarios(), new LimiteIntentos($this->bd(), $this->reloj), $this->auditoria());
     }
 
     /** Respuesta fija para fallos fuera de manejar() (arranque, lectura de la petición, envío). */
@@ -41,6 +118,8 @@ final class Aplicacion
 
     public function manejar(Peticion $p): Respuesta
     {
+        $this->peticion = $p;
+        $this->sesion = null;
         try {
             $largo = $p->cabecera('content-length') ?? '';
             $largo = ctype_digit($largo) ? (int) $largo : 0;
@@ -48,6 +127,7 @@ final class Aplicacion
             if (strlen($p->cuerpo) > Peticion::LIMITE_CUERPO || $largo > Peticion::LIMITE_CUERPO || ($largo > 0 && $p->cuerpo === '')) {
                 throw new ErrorHttp(413, 'cuerpo_muy_grande', 'El cuerpo de la petición supera el límite de 2 MB.');
             }
+            PoliticaPeticion::verificar($p);
             $r = $this->enrutador->resolver($p);
             $r->cuerpo(); // fuerza la codificación aquí: un fallo se vuelve 500 controlado
             if ($p->metodo === 'HEAD') {
@@ -57,7 +137,11 @@ final class Aplicacion
             $r = Respuesta::error($e->estado, $e->codigo, $e->getMessage(), $e->campos);
         } catch (\Throwable $e) {
             $r = self::errorFatal($e, $this->config->cookieSegura);
+        } finally {
+            $cookies = $this->sesion?->cabeceras() ?? [];
+            $this->peticion = null;
+            $this->sesion = null;
         }
-        return $r->conPorDefecto(Cabeceras::todas($this->config->cookieSegura));
+        return $r->conCabeceras($cookies)->conPorDefecto(Cabeceras::todas($this->config->cookieSegura));
     }
 }

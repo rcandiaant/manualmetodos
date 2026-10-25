@@ -54,6 +54,24 @@ final class Respuesta
         return new self($this->estado, $this->datos, $nuevas);
     }
 
+    /**
+     * Añade o reemplaza cabeceras (nombres sin distinguir mayúsculas). Se usa para Set-Cookie de la sesión.
+     * @param array<string,string> $cabeceras
+     */
+    public function conCabeceras(array $cabeceras): self
+    {
+        $nuevas = $this->cabeceras;
+        foreach ($cabeceras as $nombre => $valor) {
+            foreach (array_keys($nuevas) as $existente) {
+                if (strcasecmp((string) $existente, (string) $nombre) === 0) {
+                    unset($nuevas[$existente]);
+                }
+            }
+            $nuevas[$nombre] = $valor;
+        }
+        return new self($this->estado, $this->datos, $nuevas);
+    }
+
     public function sinCuerpo(): self
     {
         return new self($this->estado, null, $this->cabeceras);

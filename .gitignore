@@ -31,3 +31,4 @@ desktop.ini
 servidor/vendor/
 servidor/.env
 servidor/.phpunit.cache/
+servidor/var/

@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Manual\Pruebas\Soporte;
 
+use Manual\Acceso\Usuarios;
+use Manual\Aplicacion;
 use Manual\Bd\Conexion;
 use Manual\Bd\Migrador;
 use Manual\Config;
+use Manual\Seguridad\Cifrado;
 use PHPUnit\Framework\Attributes\Before;
 use PHPUnit\Framework\Attributes\BeforeClass;
 
@@ -83,5 +86,36 @@ trait BaseDePruebas
         }
         $bd->exec('SET FOREIGN_KEY_CHECKS = 1');
         $bd->exec('INSERT INTO consulta (id, motivo_obligatorio) VALUES (1, 0)');
+    }
+
+    /** Aplicación conectada a la base de pruebas, con reloj y sesiones controlables. */
+    protected function nuevaAplicacion(RelojFijo $reloj, ?AlmacenSesionMemoria $sesiones = null): Aplicacion
+    {
+        return new Aplicacion(self::configPruebas(), $reloj, $sesiones ?? new AlmacenSesionMemoria(), self::$bd);
+    }
+
+    /**
+     * Crea un usuario y devuelve sus datos con la clave en claro (para ClienteApi::comoUsuario).
+     * Usa un Argon2id barato para que las pruebas sean rápidas: la verificación lee el costo del propio hash.
+     * @param array{nombre?:string,correo?:string,laboratorio?:string,clave?:string,roles?:list<string>,activo?:bool} $datos
+     * @return array{id:int,nombre:string,correo:string,laboratorio:string,clave:string,roles:list<string>,activo:bool}
+     */
+    protected function crearUsuario(array $datos = []): array
+    {
+        static $n = 0;
+        $n++;
+        $u = $datos + [
+            'nombre' => "Usuario $n",
+            'correo' => "usuario$n@lab.cl",
+            'laboratorio' => "Laboratorio $n",
+            'clave' => "Clave-de-prueba-$n",
+            'roles' => ['laboratorio'],
+            'activo' => true,
+        ];
+        $hash = password_hash($u['clave'], PASSWORD_ARGON2ID, ['memory_cost' => 1024, 'time_cost' => 1, 'threads' => 1]);
+        $config = self::configPruebas();
+        $usuarios = new Usuarios(self::$bd, new Cifrado($config->claveCifrado, $config->claveIndice));
+        $u['id'] = $usuarios->crear($u['nombre'], $u['correo'], $u['laboratorio'], $hash, $u['roles'], $u['activo']);
+        return $u;
     }
 }

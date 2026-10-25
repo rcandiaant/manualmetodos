@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Manual\Aplicacion;
 use Manual\Config;
 use Manual\Http\Peticion;
+use Manual\RelojSistema;
+use Manual\Seguridad\AlmacenSesionNativa;
 
 ini_set('display_errors', '0');
 
@@ -13,7 +15,9 @@ try {
     require __DIR__ . '/../vendor/autoload.php';
     $config = Config::desdeEntorno(__DIR__ . '/../.env');
     date_default_timezone_set($config->zonaHoraria);
-    (new Aplicacion($config))->manejar(Peticion::desdeGlobales())->enviar();
+    // Sesiones nativas en una carpeta propia fuera de la raíz web (ver AlmacenSesionNativa).
+    $sesiones = new AlmacenSesionNativa($config->cookieSegura, dirname(__DIR__) . '/var/sesiones');
+    (new Aplicacion($config, new RelojSistema(), $sesiones))->manejar(Peticion::desdeGlobales())->enviar();
 } catch (\Throwable $e) {
     // Fallo de arranque o de envío: respuesta fija, sin detalle.
     if (!headers_sent()) {
