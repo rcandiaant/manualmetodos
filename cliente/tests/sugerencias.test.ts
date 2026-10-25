@@ -50,7 +50,6 @@ describe('calcularSugerencias', () => {
       tipo: 'contenido',
       bloqueId: 'p1',
       autor: AUTOR,
-      id: 'lab-01:p1:2',
       base: { desde: 2, hasta: 3 },
       copia: { desde: 2, hasta: 3 },
       original: [{ type: 'text', text: '42,0' }],
@@ -104,7 +103,7 @@ describe('calcularSugerencias', () => {
     expect(s[0]).toMatchObject({
       tipo: 'bloque-insertado',
       bloqueId: '@metodo',
-      id: 'lab-01:@metodo:+0',
+      orden: 0,
       profundidad: 0,
     });
   });
@@ -121,20 +120,21 @@ describe('calcularSugerencias', () => {
     const base = doc(parrafo('p1', 'Uno dos.'));
     const copia = doc(parrafo('p1', 'Tres dos.'), parrafo(null, 'Nuevo.'));
     const s = calcularSugerencias(base, copia, AUTOR);
-    expect(s.map((x) => [x.tipo, x.id])).toEqual([
-      ['contenido', 'lab-01:p1:0'],
-      ['bloque-insertado', 'lab-01:p1:+0'],
-    ]);
+    expect(s.map((x) => x.tipo)).toEqual(['contenido', 'bloque-insertado']);
+    expect(s[0].id).toMatch(/^lab-01:p1:[0-9a-f]{8}$/);
+    expect(s[1].id).toMatch(/^lab-01:p1:[0-9a-f]{8}$/);
+    expect(s[0].id).not.toBe(s[1].id);
   });
 
-  it('dos parrafos nuevos seguidos reciben +0 y +1 en orden de documento', () => {
+  it('dos parrafos nuevos seguidos reciben orden 0 y 1 en orden de documento', () => {
     const base = doc(parrafo('p1', 'Uno.'));
     const copia = doc(parrafo('p1', 'Uno.'), parrafo(null, 'A.'), parrafo(null, 'B.'));
     const s = calcularSugerencias(base, copia, AUTOR);
-    expect(s.map((x) => [x.id, x.propuesta[0].content?.[0].text])).toEqual([
-      ['lab-01:p1:+0', 'A.'],
-      ['lab-01:p1:+1', 'B.'],
+    expect(s.map((x) => [x.orden, x.propuesta[0].content?.[0].text])).toEqual([
+      [0, 'A.'],
+      [1, 'B.'],
     ]);
+    expect(s[0].id).not.toBe(s[1].id);
   });
 
   it('cambio en metodo genera sugerencia con bloqueId @metodo', () => {
@@ -146,7 +146,6 @@ describe('calcularSugerencias', () => {
     expect(s[0]).toMatchObject({
       tipo: 'contenido',
       bloqueId: '@metodo',
-      id: 'lab-01:@metodo:1',
       propuesta: [{ type: 'text', text: ' en agua' }],
     });
   });
@@ -193,7 +192,6 @@ describe('calcularSugerencias', () => {
     expect(s[0]).toMatchObject({
       tipo: 'bloque-eliminado',
       bloqueId: 'p2',
-      id: 'lab-01:p2:0',
       propuesta: [],
     });
     expect(s[0].original).toEqual([parrafo('p2', 'Dos.')]);

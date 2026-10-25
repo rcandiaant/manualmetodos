@@ -1,6 +1,7 @@
 import { diffArrays } from 'diff';
 import type { DocJSON, Sugerencia } from '../tipos';
 import { bidsMovidos } from './estructura';
+import { asignarIds } from './identidad';
 import { BLOQUES_ATOMICOS, tokenizarBloque, tokensANodos, type Token } from './tokens';
 
 /** Ancla de un bloque insertado antes de cualquier bloque con bid. */
@@ -75,7 +76,7 @@ function diffBloque(
     const soloFormato =
       orig.length === prop.length && orig.every((t, k) => t.clave === prop[k].clave);
     res.push({
-      id: `${autor}:${bid}:${grupo.b0}`,
+      id: '',
       autor,
       bloqueId: bid,
       base: { desde: grupo.b0, hasta: ib },
@@ -100,6 +101,7 @@ function diffBloque(
     else ic += n;
   }
   cerrar();
+  asignarIds(res);
   return res;
 }
 
@@ -116,7 +118,7 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
   const movidos = bidsMovidos(base, copia);
   /** Grupo de cada bid movido: el de la primera inserción que lo contiene. */
   const grupoDe = new Map<string, string>();
-  /** Inserciones ya emitidas por ancla: dan el `n` del id `${autor}:${ancla}:+${n}`. */
+  /** Inserciones ya emitidas por ancla: dan el `orden` de aplicación. */
   const insercionesPorAncla = new Map<string, number>();
   let ancla: string | null = null;
 
@@ -198,8 +200,8 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
       const k = insercionesPorAncla.get(bloqueId) ?? 0;
       insercionesPorAncla.set(bloqueId, k + 1);
       const s: Sugerencia = {
-        // espacio de ids propio (`+n`) para no chocar con contenido/formato en la posición 0
-        id: `${autor}:${bloqueId}:+${k}`,
+        id: '',
+        orden: k,
         autor,
         bloqueId,
         base: { desde: 0, hasta: 0 },
@@ -228,7 +230,7 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
     if (vistos.has(bid)) continue;
     const grupo = grupoDe.get(bid);
     res.push({
-      id: `${autor}:${bid}:0`,
+      id: '',
       autor,
       bloqueId: bid,
       base: { desde: 0, hasta: tokenizarBloque(nodo).length },
@@ -239,5 +241,6 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
       ...(grupo !== undefined ? { grupo } : {}),
     });
   }
+  asignarIds(res);
   return res;
 }

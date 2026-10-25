@@ -93,9 +93,10 @@ function editarBloque(raiz: DocJSON, bid: string, sugs: Sugerencia[]): void {
 }
 
 function numeroInsercion(s: Sugerencia): number {
-  const m = /:\+(\d+)$/.exec(s.id);
-  if (!m) throw new Error(`Id de inserción malformado: ${s.id}`);
-  return Number(m[1]);
+  if (s.orden === undefined || !Number.isInteger(s.orden) || s.orden < 0) {
+    throw new Error(`Inserción sin orden: ${s.id}`);
+  }
+  return s.orden;
 }
 
 /** Estado del autómata `content` de `tipoPadre` tras consumir `tipos`, o null si no encaja. */

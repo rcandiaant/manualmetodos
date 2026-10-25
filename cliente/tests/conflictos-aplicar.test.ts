@@ -100,9 +100,9 @@ describe('detectarConflictos', () => {
     const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b'))));
     const copiaA = doc(parrafo('p0', 'a'), lista(item(null, parrafo('nA', 'A.')), item(null, parrafo('i1', 'b'))));
     const sA = calcularSugerencias(base, copiaA, 'labA');
-    const sB = calcularSugerencias(base, copiaA, 'labB').map((x) => ({ ...x, bloqueId: 'q0', id: 'labB:q0:+0' }));
+    const sB = calcularSugerencias(base, copiaA, 'labB').map((x) => ({ ...x, bloqueId: 'q0', id: 'labB:q0:ins' }));
     const conflictos = detectarConflictos([...sA, ...sB]);
-    expect(conflictos.map((c) => c.ids)).toEqual([[sA[0].id, 'labB:q0:+0']]);
+    expect(conflictos.map((c) => c.ids)).toEqual([[sA[0].id, 'labB:q0:ins']]);
   });
 
   it('agrupa transitivamente', () => {
@@ -284,10 +284,10 @@ describe('aplicarSugerencias', () => {
       parrafo('p2', 'Dos.'),
     );
     const s = calcularSugerencias(base, copia, 'labA');
-    expect(s.map((x) => [x.id, x.profundidad])).toEqual([
-      ['labA:p1:+0', 2],
-      ['labA:p1:+1', 1],
-      ['labA:p1:+2', 0],
+    expect(s.map((x) => [x.orden, x.profundidad])).toEqual([
+      [0, 2],
+      [1, 1],
+      [2, 0],
     ]);
     expect(aplicarSugerencias(base, s)).toEqual(copia);
   });
@@ -299,11 +299,11 @@ describe('aplicarSugerencias', () => {
     expect(() => aplicarSugerencias(base, s)).toThrow(/^No se puede ubicar la inserción/);
   });
 
-  it('id de inserción malformado lanza error', () => {
+  it('inserción sin orden lanza error', () => {
     const base = doc(parrafo('p1', 'a'));
     const s = calcularSugerencias(base, doc(parrafo('p1', 'a'), parrafo('n1', 'b')), 'labA');
-    s[0].id = 'labA:p1:x';
-    expect(() => aplicarSugerencias(base, s)).toThrow(/Id de inserción malformado/);
+    delete s[0].orden;
+    expect(() => aplicarSugerencias(base, s)).toThrow(/Inserción sin orden/);
   });
 
   it('combina cambios, inserciones y eliminaciones de varios laboratorios', () => {
@@ -334,10 +334,10 @@ describe('inserción como primer hijo de un contenedor', () => {
       parrafo('n2', 'final'),
     );
     const s = calcularSugerencias(base, copia, 'labA');
-    expect(s.map((x) => [x.id, x.siguiente, x.primerHijo])).toEqual([
-      ['labA:p0:+0', 'i1', undefined],
-      ['labA:p0:+1', 'i1', true],
-      ['labA:p2:+0', undefined, undefined],
+    expect(s.map((x) => [x.bloqueId, x.orden, x.siguiente, x.primerHijo])).toEqual([
+      ['p0', 0, 'i1', undefined],
+      ['p0', 1, 'i1', true],
+      ['p2', 0, undefined, undefined],
     ]);
     expect(aplicarSugerencias(base, s)).toEqual(copia);
   });
@@ -379,7 +379,7 @@ describe('inserción como primer hijo de un contenedor', () => {
     // Si la detección no lo cubre (aquí, mismo autor armado a mano), aplicar no adivina.
     const mismoAutor = [...calcularSugerencias(base, copiaA, 'labA'), ...calcularSugerencias(base, copiaB, 'labA')];
     expect(() => aplicarSugerencias(base, mismoAutor)).toThrow(
-      /^No se puede ubicar la inserción labA:p0:\+0 \(item\) antes de i1$/,
+      /^No se puede ubicar la inserción labA:p0:[0-9a-f]{8} \(item\) antes de i1$/,
     );
   });
 });

@@ -67,7 +67,7 @@ export function montarLaboratorio(contenedor: HTMLElement, ctx: ContextoModo, la
   const guardar = () => {
     window.clearTimeout(temporizador);
     recalcular(); // las sugerencias (y sus ids) al día antes de filtrar motivos
-    // Si la copia cambió, se borran las decisiones del revisor sobre este laboratorio.
+    // Si la copia cambió, se descartan solo las decisiones de sugerencias que ya no existen.
     guardarCopia(estado, lab, editor.getJSON() as DocJSON);
     // Solo se conservan los motivos de sugerencias vigentes.
     const vigentes = new Set(sugerencias.map((s) => s.id));

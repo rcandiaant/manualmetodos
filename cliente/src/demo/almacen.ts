@@ -1,3 +1,4 @@
+import { calcularSugerencias } from '../cambios/sugerencias';
 import { jsonEstable } from '../cambios/tokens';
 import { validarDocumento } from '../esquema/esquema';
 import type { DocJSON } from '../tipos';
@@ -136,15 +137,33 @@ export function guardarEstado(estado: EstadoDemo): boolean {
 }
 
 /**
- * Guarda la copia de un laboratorio. Si cambió respecto de la guardada, borra las
- * decisiones del revisor sobre ese laboratorio (sus ids dependen de la posición y
- * podrían apuntar a otra sugerencia) y suma cuántas se borraron.
+ * Guarda la copia de un laboratorio. Los ids de las sugerencias dependen del contenido,
+ * así que las decisiones del revisor cuyo id sigue existiendo se conservan; se descartan
+ * (y se cuentan) solo las de ids desaparecidos. Un grupo (movido/unido) se decide entero:
+ * si parte de sus decisiones quedó huérfana, se descartan todas las de ese grupo.
  */
 export function guardarCopia(estado: EstadoDemo, lab: Lab, copia: DocJSON): void {
   const previa = estado.copias[lab];
   estado.copias[lab] = copia;
   if (previa && jsonEstable(previa) === jsonEstable(copia)) return;
-  borrarDecisiones(estado, lab);
+  const sugerencias = estado.base ? calcularSugerencias(estado.base, copia, lab) : [];
+  const vigentes = new Set(sugerencias.map((s) => s.id));
+  const prefijo = `${lab}:`;
+  const huerfanas = new Set(
+    Object.keys(estado.decisiones).filter((id) => id.startsWith(prefijo) && !vigentes.has(id)),
+  );
+  // Grupos con decisiones a medias (algún miembro vigente sin decidir, o decisión huérfana).
+  for (const g of new Set(sugerencias.flatMap((s) => (s.grupo ? [s.grupo] : [])))) {
+    const miembros = sugerencias.filter((s) => s.grupo === g);
+    const decididos = miembros.filter((s) => estado.decisiones[s.id] !== undefined);
+    if (decididos.length > 0 && decididos.length < miembros.length) {
+      for (const s of decididos) huerfanas.add(s.id);
+    }
+  }
+  for (const id of huerfanas) delete estado.decisiones[id];
+  if (huerfanas.size > 0) {
+    estado.decisionesDescartadas[lab] = (estado.decisionesDescartadas[lab] ?? 0) + huerfanas.size;
+  }
 }
 
 /** Descarta la copia de un laboratorio (vuelve a la base): también sus motivos y decisiones. */

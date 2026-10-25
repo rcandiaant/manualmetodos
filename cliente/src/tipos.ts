@@ -25,6 +25,8 @@ export interface Sugerencia {
    * `propuesta[0]` en la copia. Indica a qué nivel del ancla se inserta.
    */
   profundidad?: number;
+  /** Solo en `bloque-insertado`: orden de aplicación entre las inserciones de una misma ancla (desde 0). */
+  orden?: number;
   /**
    * Solo en `bloque-insertado`: bid del primer bloque existente que sigue a la
    * inserción en orden de documento en la copia; ausente si no hay ninguno.
