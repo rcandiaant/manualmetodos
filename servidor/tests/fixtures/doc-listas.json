@@ -1,0 +1,220 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "analito",
+      "content": [
+        {
+          "type": "text",
+          "text": "Analito de ejemplo"
+        }
+      ]
+    },
+    {
+      "type": "metodo",
+      "content": [
+        {
+          "type": "text",
+          "text": "Método ficticio A"
+        }
+      ]
+    },
+    {
+      "type": "seccion",
+      "attrs": {
+        "bid": "f1-s1"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Principio"
+        }
+      ]
+    },
+    {
+      "type": "parrafo",
+      "attrs": {
+        "bid": "f1-p1",
+        "pegado": false
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Texto con "
+        },
+        {
+          "type": "text",
+          "text": "negrita",
+          "marks": [
+            {
+              "type": "negrita"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "text",
+          "text": "cursiva",
+          "marks": [
+            {
+              "type": "cursiva"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": " y H"
+        },
+        {
+          "type": "text",
+          "text": "2",
+          "marks": [
+            {
+              "type": "subindice"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "O, ver "
+        },
+        {
+          "type": "referencia",
+          "attrs": {
+            "etiqueta": "tab:ejemplo"
+          }
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
+      "type": "listaOrdenada",
+      "attrs": {
+        "pegado": true
+      },
+      "content": [
+        {
+          "type": "item",
+          "attrs": {
+            "etiqueta": "a)"
+          },
+          "content": [
+            {
+              "type": "parrafo",
+              "attrs": {
+                "bid": "f1-p2",
+                "pegado": false
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Primer paso con "
+                },
+                {
+                  "type": "matematica",
+                  "attrs": {
+                    "latex": "x^{2}"
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "attrs": {
+            "etiqueta": null
+          },
+          "content": [
+            {
+              "type": "parrafo",
+              "attrs": {
+                "bid": "f1-p3",
+                "pegado": false
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Segundo paso:"
+                }
+              ]
+            },
+            {
+              "type": "listaVinetas",
+              "attrs": {
+                "pegado": false
+              },
+              "content": [
+                {
+                  "type": "item",
+                  "attrs": {
+                    "etiqueta": null
+                  },
+                  "content": [
+                    {
+                      "type": "parrafo",
+                      "attrs": {
+                        "bid": "f1-p4",
+                        "pegado": false
+                      },
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Subpaso uno."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "item",
+                  "attrs": {
+                    "etiqueta": null
+                  },
+                  "content": [
+                    {
+                      "type": "parrafo",
+                      "attrs": {
+                        "bid": "f1-p5",
+                        "pegado": false
+                      },
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Subpaso dos, 10"
+                        },
+                        {
+                          "type": "text",
+                          "text": "-3",
+                          "marks": [
+                            {
+                              "type": "superindice"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "text": " M."
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

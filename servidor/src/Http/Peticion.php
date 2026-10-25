@@ -80,14 +80,24 @@ final class Peticion
     /** @return array<string,mixed> */
     public function json(): array
     {
+        $this->jsonObjeto();
+        return json_decode($this->cuerpo, true, 64, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * El cuerpo en forma de objetos (stdClass), que distingue `{…}` de `[…]`. Es la forma que
+     * conviene pasar a ValidadorDocumento/ValidadorSugerencia (modo estricto con las listas).
+     */
+    public function jsonObjeto(): \stdClass
+    {
         try {
             $objeto = json_decode($this->cuerpo, false, 64, JSON_THROW_ON_ERROR);
-            if (!$objeto instanceof \stdClass) {
-                throw new ErrorHttp(400, 'entrada_invalida', 'El cuerpo debe ser un objeto JSON.');
-            }
-            return json_decode($this->cuerpo, true, 64, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
             throw new ErrorHttp(400, 'entrada_invalida', 'El cuerpo no es JSON válido.');
         }
+        if (!$objeto instanceof \stdClass) {
+            throw new ErrorHttp(400, 'entrada_invalida', 'El cuerpo debe ser un objeto JSON.');
+        }
+        return $objeto;
     }
 }

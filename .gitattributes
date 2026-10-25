@@ -2,3 +2,5 @@
 docker/** text eol=lf
 compose.yaml text eol=lf
 servidor/**/*.php text eol=lf
+servidor/config/*.json text eol=lf
+servidor/tests/fixtures/*.json text eol=lf

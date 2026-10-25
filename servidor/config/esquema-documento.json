@@ -1,0 +1,253 @@
+{
+  "nodos": {
+    "doc": {
+      "hijos": [
+        "analito",
+        "ecuacion",
+        "especial",
+        "listaOrdenada",
+        "listaVinetas",
+        "metodo",
+        "parrafo",
+        "seccion",
+        "tabla"
+      ],
+      "marcas": [],
+      "attrs": {},
+      "texto": false
+    },
+    "text": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {},
+      "texto": true
+    },
+    "analito": {
+      "hijos": [
+        "especialInline",
+        "matematica",
+        "notaPie",
+        "referencia",
+        "text"
+      ],
+      "marcas": [
+        "negrita",
+        "cursiva",
+        "subindice",
+        "superindice"
+      ],
+      "attrs": {},
+      "texto": false
+    },
+    "metodo": {
+      "hijos": [
+        "especialInline",
+        "matematica",
+        "notaPie",
+        "referencia",
+        "text"
+      ],
+      "marcas": [
+        "negrita",
+        "cursiva",
+        "subindice",
+        "superindice"
+      ],
+      "attrs": {},
+      "texto": false
+    },
+    "seccion": {
+      "hijos": [
+        "especialInline",
+        "matematica",
+        "notaPie",
+        "referencia",
+        "text"
+      ],
+      "marcas": [
+        "negrita",
+        "cursiva",
+        "subindice",
+        "superindice"
+      ],
+      "attrs": {
+        "bid": "null|string"
+      },
+      "texto": false
+    },
+    "parrafo": {
+      "hijos": [
+        "especialInline",
+        "matematica",
+        "notaPie",
+        "referencia",
+        "text"
+      ],
+      "marcas": [
+        "negrita",
+        "cursiva",
+        "subindice",
+        "superindice"
+      ],
+      "attrs": {
+        "bid": "null|string",
+        "pegado": "boolean"
+      },
+      "texto": false
+    },
+    "listaOrdenada": {
+      "hijos": [
+        "item"
+      ],
+      "marcas": [],
+      "attrs": {
+        "pegado": "boolean"
+      },
+      "texto": false
+    },
+    "listaVinetas": {
+      "hijos": [
+        "item"
+      ],
+      "marcas": [],
+      "attrs": {
+        "pegado": "boolean"
+      },
+      "texto": false
+    },
+    "item": {
+      "hijos": [
+        "ecuacion",
+        "especial",
+        "listaOrdenada",
+        "listaVinetas",
+        "parrafo",
+        "seccion",
+        "tabla"
+      ],
+      "marcas": [],
+      "attrs": {
+        "etiqueta": "null|string"
+      },
+      "texto": false
+    },
+    "tabla": {
+      "hijos": [
+        "filaTabla"
+      ],
+      "marcas": [],
+      "attrs": {
+        "columnas": "string",
+        "pegado": "boolean"
+      },
+      "texto": false
+    },
+    "filaTabla": {
+      "hijos": [
+        "celda"
+      ],
+      "marcas": [],
+      "attrs": {},
+      "texto": false
+    },
+    "celda": {
+      "hijos": [
+        "especialInline",
+        "matematica",
+        "notaPie",
+        "referencia",
+        "text"
+      ],
+      "marcas": [
+        "negrita",
+        "cursiva",
+        "subindice",
+        "superindice"
+      ],
+      "attrs": {
+        "bid": "null|string"
+      },
+      "texto": false
+    },
+    "ecuacion": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {
+        "latex": "string",
+        "bid": "null|string",
+        "pegado": "boolean"
+      },
+      "texto": false
+    },
+    "especial": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {
+        "latex": "string",
+        "bid": "null|string",
+        "pegado": "boolean"
+      },
+      "texto": false
+    },
+    "matematica": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {
+        "latex": "string"
+      },
+      "texto": false
+    },
+    "referencia": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {
+        "etiqueta": "string"
+      },
+      "texto": false
+    },
+    "notaPie": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {
+        "bloques": "json"
+      },
+      "texto": false
+    },
+    "especialInline": {
+      "hijos": [],
+      "marcas": [],
+      "attrs": {
+        "latex": "string"
+      },
+      "texto": false
+    }
+  },
+  "marcas": {
+    "negrita": {
+      "attrs": {},
+      "excluye": [
+        "negrita"
+      ]
+    },
+    "cursiva": {
+      "attrs": {},
+      "excluye": [
+        "cursiva"
+      ]
+    },
+    "subindice": {
+      "attrs": {},
+      "excluye": [
+        "subindice",
+        "superindice"
+      ]
+    },
+    "superindice": {
+      "attrs": {},
+      "excluye": [
+        "subindice",
+        "superindice"
+      ]
+    }
+  }
+}
