@@ -129,7 +129,7 @@ function editarTexto(az: Azar, d: DocJSON): void {
 
 /**
  * Inserta un bloque nuevo: en el cuerpo, dentro de un ítem o como ítem nuevo
- * (nunca como primer ítem de una lista: limitación conocida, ver más abajo).
+ * (en cualquier posición de una lista, también como primer ítem).
  */
 function insertarBloque(az: Azar, d: DocJSON): void {
   const nuevo = (): DocJSON =>
@@ -141,7 +141,7 @@ function insertarBloque(az: Azar, d: DocJSON): void {
     it.content!.splice(1 + az.entero(it.content!.length), 0, nuevo());
   } else if (opcion === 2 && listas.length > 0) {
     const l = az.elegir(listas);
-    l.content!.splice(1 + az.entero(l.content!.length), 0, item(null, conInline(parrafo(`n${++nuevos}`), az)));
+    l.content!.splice(az.entero(l.content!.length + 1), 0, item(null, conInline(parrafo(`n${++nuevos}`), az)));
   } else {
     d.content!.splice(2 + az.entero(d.content!.length - 1), 0, nuevo());
   }
@@ -194,21 +194,19 @@ describe('propiedad: aplicar todas las sugerencias reproduce la copia (M5)', () 
 });
 
 /**
- * Limitación conocida (fuera del alcance de M5): un ítem nuevo como PRIMER ítem
- * de una lista se ancla al bloque anterior a la lista, y `aplicarSugerencias` no
- * baja a la lista siguiente. Estos tests documentan el comportamiento actual y
- * empezarán a fallar (avisando) cuando se corrija.
+ * Un ítem nuevo como PRIMER ítem de una lista se ubica antes del bloque existente
+ * siguiente (`primerHijo` + `siguiente`), no tras el bloque anterior a la lista.
  */
-describe('limitación conocida: ítem nuevo al inicio de una lista', () => {
+describe('ítem nuevo al inicio de una lista', () => {
   const nuevoItem = item(null, parrafo('n', 'Nuevo.'));
 
-  it.fails('tras un párrafo: aplicar lanza error en vez de insertarlo', () => {
+  it('tras un párrafo: inserta el primer ítem en la lista', () => {
     const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b'))));
     const copia = doc(parrafo('p0', 'a'), lista(nuevoItem, item(null, parrafo('i1', 'b'))));
     expect(aplicarSugerencias(base, calcularSugerencias(base, copia, 'lab'))).toEqual(copia);
   });
 
-  it.fails('tras otra lista: el ítem cae al final de la lista anterior', () => {
+  it('tras otra lista: inserta el primer ítem en su propia lista', () => {
     const base = doc(lista(item(null, parrafo('i0', 'a'))), lista(item(null, parrafo('i1', 'b'))));
     const copia = doc(lista(item(null, parrafo('i0', 'a'))), lista(nuevoItem, item(null, parrafo('i1', 'b'))));
     expect(aplicarSugerencias(base, calcularSugerencias(base, copia, 'lab'))).toEqual(copia);

@@ -146,8 +146,11 @@ function admite(padre: DocJSON, indice: number, tipo: string): boolean {
  * ubica tras su predecesor (el bloque ancla o la inserción anterior): justo después del
  * ancestro del predecesor cuya profundidad es `profundidad` (R13). Sin `profundidad`,
  * como hermano del primer ancestro cuyo padre admite el tipo insertado (R4).
+ * Una inserción `primerHijo` se ubica, en cambio, justo antes del ancestro de su bloque
+ * `siguiente` cuya profundidad es `profundidad`; las siguientes se encadenan tras ella.
+ * Si `siguiente` falta o lo elimina otra sugerencia aceptada (`eliminados`), lanza error.
  */
-function insertarEnAncla(raiz: DocJSON, ancla: string, sugs: Sugerencia[]): void {
+function insertarEnAncla(raiz: DocJSON, ancla: string, sugs: Sugerencia[], eliminados: Set<string>): void {
   let previo: DocJSON | null = null;
   const ordenadas = sugs
     .map((s) => ({ n: numeroInsercion(s), s }))
@@ -156,30 +159,45 @@ function insertarEnAncla(raiz: DocJSON, ancla: string, sugs: Sugerencia[]): void
   for (const s of ordenadas) {
     const nuevo = structuredClone(s.propuesta[0]);
     const tipo = nuevo?.type ?? '';
-    let cadena: Eslabon[] | null;
-    if (previo) {
-      const p = previo;
-      cadena = buscar(raiz, (n) => n === p);
-    } else if (ancla === ANCLA_INICIO) {
-      // Sin bloque previo: se coloca al inicio del cuerpo (tras la cabecera, si la hay).
-      cadena = [{ nodo: raiz, padre: raiz, indice: numCabecera(raiz) - 1 }];
-    } else {
-      cadena = buscarBloque(raiz, ancla);
-    }
+    const lugar = s.primerHijo ? `antes de ${s.siguiente ?? '(sin siguiente)'}` : `tras ${ancla}`;
+    const error = () => new Error(`No se puede ubicar la inserción ${s.id} (${tipo || 'vacía'}) ${lugar}`);
     const valido = ({ padre, indice }: Eslabon) =>
       admite(padre, indice, tipo) && (padre !== raiz || indice + 1 >= numCabecera(raiz));
-    const eslabones = cadena ?? [];
+    // `destino`: se inserta en `destino.padre` en la posición `destino.indice + 1`.
     let destino: Eslabon | undefined;
-    if (s.profundidad !== undefined) {
-      // eslabones[k].nodo tiene profundidad eslabones.length - 1 - k.
-      const candidato = eslabones[eslabones.length - 1 - s.profundidad];
-      destino = candidato && valido(candidato) ? candidato : undefined;
+    if (s.primerHijo) {
+      const sig = s.siguiente;
+      if (!nuevo || sig === undefined || s.profundidad === undefined || eliminados.has(sig)) throw error();
+      let cadena: Eslabon[];
+      try {
+        cadena = buscarBloque(raiz, sig);
+      } catch {
+        throw error();
+      }
+      const candidato = cadena[cadena.length - 1 - s.profundidad];
+      const antes = candidato && { ...candidato, indice: candidato.indice - 1 };
+      destino = antes && valido(antes) ? antes : undefined;
     } else {
-      destino = eslabones.find(valido);
+      let cadena: Eslabon[] | null;
+      if (previo) {
+        const p = previo;
+        cadena = buscar(raiz, (n) => n === p);
+      } else if (ancla === ANCLA_INICIO) {
+        // Sin bloque previo: se coloca al inicio del cuerpo (tras la cabecera, si la hay).
+        cadena = [{ nodo: raiz, padre: raiz, indice: numCabecera(raiz) - 1 }];
+      } else {
+        cadena = buscarBloque(raiz, ancla);
+      }
+      const eslabones = cadena ?? [];
+      if (s.profundidad !== undefined) {
+        // eslabones[k].nodo tiene profundidad eslabones.length - 1 - k.
+        const candidato = eslabones[eslabones.length - 1 - s.profundidad];
+        destino = candidato && valido(candidato) ? candidato : undefined;
+      } else {
+        destino = eslabones.find(valido);
+      }
     }
-    if (!nuevo || !destino) {
-      throw new Error(`No se puede ubicar la inserción ${s.id} (${tipo || 'vacía'}) tras ${ancla}`);
-    }
+    if (!nuevo || !destino) throw error();
     destino.padre.content ??= [];
     destino.padre.content.splice(destino.indice + 1, 0, nuevo);
     previo = nuevo;
@@ -235,9 +253,10 @@ export function aplicarSugerencias(base: DocJSON, aceptadas: Sugerencia[]): DocJ
   // 1) Texto, con los bloques aún intactos (los rangos son de la base).
   for (const [bid, sugs] of agrupar(['contenido', 'formato'])) editarBloque(res, bid, sugs);
   // 2) Inserciones, antes de eliminar para que sus anclas sigan existiendo.
-  for (const [ancla, sugs] of agrupar(['bloque-insertado'])) insertarEnAncla(res, ancla, sugs);
-  // 3) Eliminaciones y limpieza de contenedores vaciados.
   const eliminadas = agrupar(['bloque-eliminado']);
+  const bidsEliminados = new Set(eliminadas.keys());
+  for (const [ancla, sugs] of agrupar(['bloque-insertado'])) insertarEnAncla(res, ancla, sugs, bidsEliminados);
+  // 3) Eliminaciones y limpieza de contenedores vaciados.
   const eliminadoEn = new Map<DocJSON, string>();
   for (const bid of eliminadas.keys()) {
     if (TIPO_CABECERA[bid]) throw new Error(`No se puede eliminar la cabecera: ${bid}`);

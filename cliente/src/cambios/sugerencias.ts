@@ -135,20 +135,46 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
     return hay && !algunoExistente;
   };
 
+  /** Ancestros del nodo visitado, desde `doc`: `pila[d + 1]` tiene profundidad `d`. */
+  const pila: DocJSON[] = [];
+  /** Inserciones emitidas que aún esperan su `siguiente`, con el padre de su nodo en la copia. */
+  let pendientes: { s: Sugerencia; padre: DocJSON; esPrimero: boolean }[] = [];
+
+  /**
+   * Al ver un bloque existente: es el `siguiente` de las inserciones pendientes. Una
+   * inserción primer hijo (padre no `doc`) se marca `primerHijo` si el ancestro de ese
+   * bloque a su misma profundidad es hijo de su mismo padre; si no, queda anclada al anterior.
+   * Ese respaldo es prácticamente inalcanzable con padre ≠ `doc`: si el padre contiene un
+   * bloque existente, `siguiente` está dentro de él; si no, el padre entero es `esNuevo`.
+   */
+  const resolverPendientes = (bid: string) => {
+    for (const { s, padre, esPrimero } of pendientes) {
+      s.siguiente = bid;
+      const prof = s.profundidad as number;
+      if (esPrimero && padre.type !== 'doc' && pila[prof] === padre && pila[prof + 1] !== undefined) {
+        s.primerHijo = true;
+      }
+    }
+    pendientes = [];
+  };
+
   /** `prof`: ancestros de `n` sin contar `doc` (el doc se visita con -1). */
-  const visitar = (n: DocJSON, prof: number) => {
+  const visitar = (n: DocJSON, prof: number, padre: DocJSON | null, esPrimero: boolean) => {
     if (esBloque(n) && esExistente(n)) {
       const bid = bidDe(n) as string;
       vistos.add(bid);
+      pila.push(n);
+      resolverPendientes(bid);
+      pila.pop();
       res.push(...diffBloque(bid, bloquesBase.get(bid) as DocJSON, n, autor));
       ancla = bid;
       return;
     }
-    if (n.type !== 'doc' && esNuevo(n)) {
+    if (padre !== null && esNuevo(n)) {
       const bloqueId = ancla ?? ANCLA_INICIO;
       const k = insercionesPorAncla.get(bloqueId) ?? 0;
       insercionesPorAncla.set(bloqueId, k + 1);
-      res.push({
+      const s: Sugerencia = {
         // espacio de ids propio (`+n`) para no chocar con contenido/formato en la posición 0
         id: `${autor}:${bloqueId}:+${k}`,
         autor,
@@ -159,12 +185,16 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
         propuesta: [structuredClone(n)],
         tipo: 'bloque-insertado',
         profundidad: prof,
-      });
+      };
+      res.push(s);
+      pendientes.push({ s, padre, esPrimero });
       return;
     }
-    for (const h of n.content ?? []) visitar(h, prof + 1);
+    pila.push(n);
+    (n.content ?? []).forEach((h, i) => visitar(h, prof + 1, n, i === 0));
+    pila.pop();
   };
-  visitar(copia, -1);
+  visitar(copia, -1, null, false);
 
   for (const [bid, nodo] of bloquesBase) {
     if (vistos.has(bid)) continue;

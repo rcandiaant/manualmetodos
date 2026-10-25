@@ -79,6 +79,32 @@ describe('detectarConflictos', () => {
     expect(detectarConflictos([...a, ...b])).toEqual([{ bloqueId: 'p2', ids: [a[0].id, b[0].id] }]);
   });
 
+  it('primer hijo antes de X choca con eliminar X', () => {
+    const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b')), item(null, parrafo('i2', 'c'))));
+    const copiaA = doc(
+      parrafo('p0', 'a'),
+      lista(item(null, parrafo('n1', 'Nuevo.')), item(null, parrafo('i1', 'b')), item(null, parrafo('i2', 'c'))),
+    );
+    const copiaB = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i2', 'c'))));
+    const sA = calcularSugerencias(base, copiaA, 'labA');
+    const sB = calcularSugerencias(base, copiaB, 'labB');
+    expect(sA[0]).toMatchObject({ primerHijo: true, siguiente: 'i1' });
+    const conflictos = detectarConflictos([...sA, ...sB]);
+    expect(conflictos.map((c) => c.ids)).toEqual([[sA[0].id, sB[0].id]]);
+    // El mismo autor no choca consigo mismo.
+    expect(detectarConflictos([...sA, { ...sB[0], autor: 'labA' }])).toEqual([]);
+  });
+
+  it('dos primeros hijos antes del mismo X chocan', () => {
+    // Anclas distintas (p0 y q0) pero el mismo `siguiente`: el orden entre ambos es ambiguo.
+    const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b'))));
+    const copiaA = doc(parrafo('p0', 'a'), lista(item(null, parrafo('nA', 'A.')), item(null, parrafo('i1', 'b'))));
+    const sA = calcularSugerencias(base, copiaA, 'labA');
+    const sB = calcularSugerencias(base, copiaA, 'labB').map((x) => ({ ...x, bloqueId: 'q0', id: 'labB:q0:+0' }));
+    const conflictos = detectarConflictos([...sA, ...sB]);
+    expect(conflictos.map((c) => c.ids)).toEqual([[sA[0].id, 'labB:q0:+0']]);
+  });
+
   it('agrupa transitivamente', () => {
     const [plantilla] = calcularSugerencias(BASE, conCambio('p1', 'Diluir 42,0 g de NaCl en agua.'), 'labA');
     const s = (autor: string, desde: number, hasta: number) => ({
@@ -288,6 +314,72 @@ describe('aplicarSugerencias', () => {
     const s = [...calcularSugerencias(BASE, copiaA, 'labA'), ...calcularSugerencias(BASE, copiaB, 'labB')];
     expect(aplicarSugerencias(BASE, s)).toEqual(
       doc(parrafo('p1', 'Disolver 42,00 g de NaCl en agua.'), parrafo('p2', 'Agitar durante 5 minutos.'), parrafo('nA', 'Reposar.')),
+    );
+  });
+});
+
+describe('inserción como primer hijo de un contenedor', () => {
+  const celda = (bid: string, t: string): DocJSON => ({ type: 'celda', attrs: { bid }, content: [texto(t)] });
+  const fila = (...celdas: DocJSON[]): DocJSON => ({ type: 'filaTabla', content: celdas });
+  const tabla = (...filas: DocJSON[]): DocJSON => ({ type: 'tabla', attrs: { columnas: 'll' }, content: filas });
+  const nota = (...bloques: DocJSON[]): DocJSON => ({ type: 'notaPie', attrs: { bloques } });
+
+  it('emite siguiente en toda inserción y primerHijo solo en el primer hijo', () => {
+    const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b'))), parrafo('p2', 'c'));
+    const copia = doc(
+      parrafo('p0', 'a'),
+      parrafo('n0', 'antes'),
+      lista(item(null, parrafo('n1', 'primero')), item(null, parrafo('i1', 'b'))),
+      parrafo('p2', 'c'),
+      parrafo('n2', 'final'),
+    );
+    const s = calcularSugerencias(base, copia, 'labA');
+    expect(s.map((x) => [x.id, x.siguiente, x.primerHijo])).toEqual([
+      ['labA:p0:+0', 'i1', undefined],
+      ['labA:p0:+1', 'i1', true],
+      ['labA:p2:+0', undefined, undefined],
+    ]);
+    expect(aplicarSugerencias(base, s)).toEqual(copia);
+  });
+
+  it('primer hijo en sublista, en tabla y en nota', () => {
+    // Sublista: ítem nuevo antes del primer ítem existente de la sublista.
+    const baseL = doc(lista(item(null, parrafo('p1', 'Uno.'), lista(item(null, parrafo('p3', 'Tres.'))))));
+    const copiaL = doc(
+      lista(item(null, parrafo('p1', 'Uno.'), lista(item(null, parrafo('n1', 'Nuevo.')), item(null, parrafo('p3', 'Tres.'))))),
+    );
+    expect(aplicarSugerencias(baseL, calcularSugerencias(baseL, copiaL, 'labA'))).toEqual(copiaL);
+
+    // Tabla: fila nueva como primera fila.
+    const baseT = doc(parrafo('p0', 'a'), tabla(fila(celda('c1', 'x'), celda('c2', 'y'))));
+    const copiaT = doc(
+      parrafo('p0', 'a'),
+      tabla(fila(celda('n1', 'A'), celda('n2', 'B')), fila(celda('c1', 'x'), celda('c2', 'y'))),
+    );
+    expect(aplicarSugerencias(baseT, calcularSugerencias(baseT, copiaT, 'labA'))).toEqual(copiaT);
+
+    // Nota al pie con bloques: párrafo nuevo como primer bloque de la nota. La nota es un
+    // átomo inline: el caso se cubre por el diff de tokens del párrafo que la contiene
+    // (una sugerencia `contenido` sobre p0), no por la ruta `primerHijo`.
+    const baseN = doc(parrafo('p0', 'a', nota(parrafo(null, 'Nota.'))));
+    const copiaN = doc(parrafo('p0', 'a', nota(parrafo(null, 'Primero.'), parrafo(null, 'Nota.'))));
+    expect(aplicarSugerencias(baseN, calcularSugerencias(baseN, copiaN, 'labA'))).toEqual(copiaN);
+  });
+
+  it('primer hijo cuyo siguiente fue eliminado lanza error visible', () => {
+    const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b')), item(null, parrafo('i2', 'c'))));
+    const copiaA = doc(
+      parrafo('p0', 'a'),
+      lista(item(null, parrafo('n1', 'Nuevo.')), item(null, parrafo('i1', 'b')), item(null, parrafo('i2', 'c'))),
+    );
+    const copiaB = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i2', 'c'))));
+    // Entre autores distintos el choque se detecta antes, como conflicto (R4).
+    const s = [...calcularSugerencias(base, copiaA, 'labA'), ...calcularSugerencias(base, copiaB, 'labB')];
+    expect(() => aplicarSugerencias(base, s)).toThrow(/^Sugerencias en conflicto/);
+    // Si la detección no lo cubre (aquí, mismo autor armado a mano), aplicar no adivina.
+    const mismoAutor = [...calcularSugerencias(base, copiaA, 'labA'), ...calcularSugerencias(base, copiaB, 'labA')];
+    expect(() => aplicarSugerencias(base, mismoAutor)).toThrow(
+      /^No se puede ubicar la inserción labA:p0:\+0 \(item\) antes de i1$/,
     );
   });
 });

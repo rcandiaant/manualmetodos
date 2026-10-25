@@ -25,6 +25,22 @@ function chocan(a: Sugerencia, b: Sugerencia): boolean {
   return vacioA && vacioB && a.base.desde === b.base.desde;
 }
 
+/**
+ * true si dos sugerencias de autores distintos chocan a través del `siguiente` de una
+ * inserción `primerHijo` (que se ubica antes de ese bloque, R4):
+ * - una es `primerHijo` antes de X y la otra elimina X;
+ * - ambas son `primerHijo` antes del mismo X.
+ */
+function chocanPorSiguiente(a: Sugerencia, b: Sugerencia): boolean {
+  if (a.autor === b.autor) return false;
+  const antesDe = (s: Sugerencia) => (s.primerHijo ? s.siguiente : undefined);
+  const elimina = (s: Sugerencia) => (s.tipo === 'bloque-eliminado' ? s.bloqueId : undefined);
+  const xa = antesDe(a);
+  const xb = antesDe(b);
+  if (xa !== undefined && (xa === xb || xa === elimina(b))) return true;
+  return xb !== undefined && xb === elimina(a);
+}
+
 /** Grupos (cierre transitivo) de sugerencias en conflicto, en orden de aparición. */
 export function detectarConflictos(sugerencias: Sugerencia[]): Conflicto[] {
   const padre = sugerencias.map((_, i) => i);
@@ -53,6 +69,16 @@ export function detectarConflictos(sugerencias: Sugerencia[]): Conflicto[] {
         padre[raiz(i)] = raiz(j);
       }
     }
+  }
+
+  // Choques entre bloques distintos vía `siguiente` de una inserción `primerHijo`.
+  const conSiguiente = sugerencias.flatMap((s, i) => (s.primerHijo && s.siguiente !== undefined ? [i] : []));
+  for (const i of conSiguiente) {
+    sugerencias.forEach((_, j) => {
+      if (i === j || !chocanPorSiguiente(sugerencias[i], sugerencias[j])) return;
+      enConflicto.add(i).add(j);
+      padre[raiz(i)] = raiz(j);
+    });
   }
 
   const grupos = new Map<number, Conflicto>();
