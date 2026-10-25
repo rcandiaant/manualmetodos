@@ -285,7 +285,7 @@ final class RevisionTest extends TestCase
 
         $this->cerrarConsulta();
         $this->revisor->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'aceptada', 'notaResolucion' => 'Sí']);
-        $this->revisor->patch("/sugerencias/{$this->sugIds[1]}", ['estado' => 'rechazada', 'notaResolucion' => 'No']);
+        $this->revisor->patch("/sugerencias/{$this->sugIds[1]}", ['estado' => 'rechazada', 'notaResolucion' => 'No', 'derivadaReunion' => true]);
         $this->revisor->patch("/comentarios/{$this->comIds[0]}/resolucion", ['estado' => 'resuelto', 'notaResolucion' => 'Visto']);
 
         $r = $this->lab->get("/capitulos/{$this->cap}/mis-aportes");
@@ -294,6 +294,7 @@ final class RevisionTest extends TestCase
         self::assertCount(1, $d['sugerencias']);
         self::assertSame('aceptada', $d['sugerencias'][0]['estado']);
         self::assertSame('Sí', $d['sugerencias'][0]['notaResolucion']);
+        self::assertFalse($d['sugerencias'][0]['derivadaReunion']);
         self::assertSame('u' . $this->labU['id'] . ':f1-p1:a', $d['sugerencias'][0]['id']);
         self::assertCount(1, $d['comentarios']);
         self::assertSame($this->comIds[0], $d['comentarios'][0]['id']);
@@ -307,6 +308,7 @@ final class RevisionTest extends TestCase
 
         $d2 = json_decode($this->lab2->get("/capitulos/{$this->cap}/mis-aportes")->cuerpo(), true);
         self::assertSame('rechazada', $d2['sugerencias'][0]['estado']);
+        self::assertTrue($d2['sugerencias'][0]['derivadaReunion'], 'el laboratorio ve que su aporte se derivó a reunión');
         self::assertSame('abierto', $d2['comentarios'][0]['estado']);
 
         self::assertSame(403, $this->revisor->get("/capitulos/{$this->cap}/mis-aportes")->estado);
@@ -376,7 +378,9 @@ final class RevisionTest extends TestCase
             'content-type' => 'application/json', 'x-csrf-token' => (string) $this->revisor->csrf,
             'cookie' => $this->revisor->nombreCookie . '=' . $this->revisor->cookie,
         ], '{"docJson":{"type":"doc","content":[]},"tex":"a' . "\xC3\x28" . '"}', '127.0.0.1'));
-        self::assertContains($r->estado, [400, 422]);
+        // json_decode rechaza UTF-8 inválido antes de validar: siempre 400 entrada_invalida.
+        self::assertSame(400, $r->estado, $r->cuerpo());
+        self::assertSame('entrada_invalida', $r->datos['error']['codigo']);
         self::assertSame(1, (int) self::$bd->query("SELECT COUNT(*) FROM versiones_capitulo WHERE tipo = 'final'")->fetchColumn());
         self::assertSame(404, $this->revisor->put('/capitulos/9999/final', ['docJson' => $this->docFinal(), 'tex' => 'x'])->estado);
     }

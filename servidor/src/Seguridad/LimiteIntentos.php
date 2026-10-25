@@ -11,9 +11,10 @@ use Manual\Reloj;
  *
  * Flujo: reservar() ANTES de verificar la clave y luego confirmarFallo() o confirmarExito().
  * - reservar() cuenta el intento de forma atómica (todas las claves en una transacción con
- *   SELECT … FOR UPDATE). Si alguna clave está bloqueada o ya tiene 5 intentos sin resolver, rechaza
- *   sin contar nada. Así N peticiones en paralelo no pueden probar más de 5 claves por ventana.
- * - confirmarFallo(): el intento ya contado se mantiene; al llegar a 5 la clave se bloquea
+ *   SELECT … FOR UPDATE). Si alguna clave está bloqueada o ya agotó su umbral (5 por cuenta, 20 por IP)
+ *   con intentos sin resolver, rechaza sin contar nada. Así N peticiones en paralelo no pueden probar
+ *   más de 5 claves de una cuenta por ventana.
+ * - confirmarFallo(): el intento ya contado se mantiene; al llegar al umbral la clave se bloquea
  *   1, 5, 15 y 60 min (el último se repite) y vuelve a contar desde cero.
  * - confirmarExito(): borra la clave de la cuenta y devuelve la reserva de la IP. La IP no se
  *   reinicia del todo: si no, quien tenga una cuenta válida podría intercalar entradas correctas
@@ -22,7 +23,10 @@ use Manual\Reloj;
  */
 final class LimiteIntentos
 {
-    public const UMBRAL = 5;
+    /** Fallos por cuenta antes de bloquear. */
+    public const UMBRAL_CUENTA = 5;
+    /** Fallos por IP: más alto, porque varios laboratorios pueden salir por la misma NAT institucional. */
+    public const UMBRAL_IP = 20;
     /** @var list<int> segundos */
     public const BLOQUEOS = [60, 300, 900, 3600];
     public const OLVIDO = 86400;
@@ -55,7 +59,7 @@ final class LimiteIntentos
             }
             // Intentos sin resolver ya agotados (peticiones en paralelo): se bloquea ahora mismo.
             foreach ($filas as $clave => $f) {
-                if ($f['fallos'] >= self::UMBRAL) {
+                if ($f['fallos'] >= self::umbral($clave)) {
                     $espera = max($espera, $this->bloquear($clave, $f, $ahora));
                     $this->bloqueadasAlReservar[] = $clave;
                 }
@@ -81,7 +85,7 @@ final class LimiteIntentos
         $bloqueadas = $this->enTransaccion($claves, function (array $filas) use ($ahora): array {
             $bloqueadas = [];
             foreach ($filas as $clave => $f) {
-                if ($f['fallos'] >= self::UMBRAL) {
+                if ($f['fallos'] >= self::umbral($clave)) {
                     $this->bloquear($clave, $f, $ahora);
                     $bloqueadas[] = $clave;
                 } else {
@@ -161,6 +165,11 @@ final class LimiteIntentos
     {
         $this->bd->prepare('UPDATE intentos_login SET fallos = ?, bloqueos = ?, bloqueado_hasta = COALESCE(?, bloqueado_hasta), actualizado = ? WHERE clave = ?')
             ->execute([$fallos, $bloqueos, $hasta === null ? null : self::sql($hasta), self::sql($ahora), $clave]);
+    }
+
+    private static function umbral(string $clave): int
+    {
+        return str_starts_with($clave, 'ip:') ? self::UMBRAL_IP : self::UMBRAL_CUENTA;
     }
 
     /** Borra claves olvidadas y sin bloqueo vigente, para que la tabla no crezca sin límite. */

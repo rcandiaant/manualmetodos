@@ -14,7 +14,13 @@ final class Claves
      * Hash Argon2id fijo, con los mismos parámetros que hash(), de una clave que nadie usa.
      * El login lo verifica cuando el correo no existe, para tardar lo mismo que con una clave errónea.
      */
-    public const HASH_FICTICIO = '$argon2id$v=19$m=65536,t=4,p=1$eEFYTHM0UlJTVGlvRXZCWA$gGmYQatF/FclsPu7mYmCPS9xxbdFRACoWV1zEfEHKck';
+    public const HASH_FICTICIO = '$argon2id$v=19$m=19456,t=2,p=1$dzFLaFZkQWlCdFJzdFRlTg$Xsx24sl7/N/ULwyM3jOJTUOZDnvdb/V/rkY1TY+LzQc';
+
+    /**
+     * 19 MiB, 2 pasadas, 1 hilo (mínimo recomendado por OWASP). El valor por defecto de PHP (64 MiB, t=4)
+     * dejaría ~8 logins simultáneos llenando la LVE de 512 MB del hosting compartido.
+     */
+    public const ARGON2ID = ['memory_cost' => 19456, 'time_cost' => 2, 'threads' => 1];
 
     /** Ficticio para PHP sin Argon2id: bcrypt con el mismo costo que hash(). */
     public const HASH_FICTICIO_BCRYPT = '$2y$12$.ZHv31eqDeGF4q1e8k7M3.LscPRoy66OQ2VSRoOFjtdxi/ShWfW26';
@@ -32,7 +38,7 @@ final class Claves
     public static function hash(#[\SensitiveParameter] string $clave, ?bool $argonDisponible = null): string
     {
         $algoritmo = self::algoritmo($argonDisponible);
-        return password_hash($clave, $algoritmo, $algoritmo === PASSWORD_BCRYPT ? ['cost' => self::COSTO_BCRYPT] : []);
+        return password_hash($clave, $algoritmo, $algoritmo === PASSWORD_BCRYPT ? ['cost' => self::COSTO_BCRYPT] : self::ARGON2ID);
     }
 
     /** Hash ficticio del mismo algoritmo y costo que hash(), para igualar tiempos con correos inexistentes. */

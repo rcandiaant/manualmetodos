@@ -1,0 +1,21 @@
+# Actualizaciones de dependencias (spec §8, «escanear dependencias»). La CI ya corre
+# `npm audit`, `composer audit` y gitleaks; Dependabot abre los PR de actualización.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /cliente
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: composer
+    directory: /servidor
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -117,7 +117,7 @@ final class Sugerencias
     public function propiasConResolucion(int $usuarioId, int $capituloId): array
     {
         $st = $this->bd->prepare(
-            'SELECT datos, motivo, estado, nota_resolucion FROM sugerencias
+            'SELECT datos, motivo, estado, nota_resolucion, derivada_reunion FROM sugerencias
              WHERE usuario_id = ? AND capitulo_id = ? ORDER BY id'
         );
         $st->execute([$usuarioId, $capituloId]);
@@ -130,6 +130,7 @@ final class Sugerencias
             }
             $s->estado = $f['estado'];
             $s->notaResolucion = $f['nota_resolucion'];
+            $s->derivadaReunion = (bool) $f['derivada_reunion'];
             $res[] = $s;
         }
         return $res;

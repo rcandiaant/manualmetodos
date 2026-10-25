@@ -70,4 +70,25 @@ final class LimiteIntentosTest extends TestCase
         $filas = self::$bd->query("SELECT clave, fallos FROM intentos_login")->fetchAll();
         $this->assertSame([['clave' => 'ip:oficina', 'fallos' => 0]], array_map(fn ($f) => ['clave' => $f['clave'], 'fallos' => (int) $f['fallos']], $filas));
     }
+
+    public function test_umbral_de_ip_20_y_de_cuenta_5(): void
+    {
+        $l = new LimiteIntentos(self::$bd, new RelojFijo());
+        // 19 fallos desde una IP, cada uno contra una cuenta distinta: la IP aún no bloquea.
+        for ($i = 0; $i < 19; $i++) {
+            $this->assertSame(0, $l->reservar(['ip:nat', "cuenta:c$i"]), "fallo $i");
+            $this->assertSame([], $l->confirmarFallo(['ip:nat', "cuenta:c$i"]));
+        }
+        $this->assertSame(0, $l->reservar(['ip:nat', 'cuenta:c19']));
+        $this->assertSame(['ip:nat'], $l->confirmarFallo(['ip:nat', 'cuenta:c19']), 'el fallo 20 bloquea la IP');
+        $this->assertSame(60, $l->reservar(['ip:nat', 'cuenta:nueva']));
+
+        // La cuenta sigue con 5, aunque cada intento venga de otra IP.
+        for ($i = 0; $i < 4; $i++) {
+            $l->reservar(["ip:x$i", 'cuenta:victima']);
+            $this->assertSame([], $l->confirmarFallo(["ip:x$i", 'cuenta:victima']));
+        }
+        $l->reservar(['ip:x4', 'cuenta:victima']);
+        $this->assertSame(['cuenta:victima'], $l->confirmarFallo(['ip:x4', 'cuenta:victima']));
+    }
 }

@@ -16,6 +16,8 @@ use Manual\Reloj;
  * - Al iniciar sesión se regenera el id (el anterior se destruye) y se crea un token CSRF nuevo.
  * - Vence tras 2 h sin actividad o 12 h desde el inicio, lo que ocurra primero.
  * - El usuario se relee de la base en cada petición: desactivarlo o cambiarle roles rige de inmediato.
+ * - Guarda una huella de clave_hash (16 hex de su SHA-256, nunca el hash). Si la clave se regenera,
+ *   la huella deja de coincidir y la sesión se destruye: todas las sesiones abiertas de esa cuenta caen.
  * La cookie sale en las cabeceras de la Respuesta (Set-Cookie), nunca con header() directo.
  */
 final class Sesion
@@ -63,7 +65,7 @@ final class Sesion
             return null;
         }
         $u = ($this->usuarios)()->porId((int) $datos['usuario_id']);
-        if ($u === null || !$u['activo']) {
+        if ($u === null || !$u['activo'] || !hash_equals(self::huella($u['clave_hash']), (string) $datos['huella'])) {
             $this->cerrar();
             return null;
         }
@@ -95,12 +97,12 @@ final class Sesion
         return $u;
     }
 
-    /** Inicia sesión: id nuevo (el anterior se destruye), marcas de tiempo y token CSRF. */
-    public function iniciar(int $usuarioId, string $csrf): void
+    /** Inicia sesión: id nuevo (el anterior se destruye), marcas de tiempo, huella de la clave y token CSRF. */
+    public function iniciar(int $usuarioId, string $claveHash, string $csrf): void
     {
         $this->id = $this->almacen->regenerar($this->id);
         $ahora = $this->ahora();
-        $this->datos = ['usuario_id' => $usuarioId, 'creada' => $ahora, 'ultimo' => $ahora, 'csrf' => $csrf];
+        $this->datos = ['usuario_id' => $usuarioId, 'huella' => self::huella($claveHash), 'creada' => $ahora, 'ultimo' => $ahora, 'csrf' => $csrf];
         $this->cargada = true;
         $this->almacen->guardar($this->id, $this->datos);
         $this->setCookie = self::nombreCookie($this->cookieSegura) . '=' . $this->id . $this->atributosCookie();
@@ -143,7 +145,7 @@ final class Sesion
             return null;
         }
         $datos = $this->almacen->cargar($this->id);
-        if (!is_array($datos) || !isset($datos['usuario_id'], $datos['creada'], $datos['ultimo'], $datos['csrf'])) {
+        if (!is_array($datos) || !isset($datos['usuario_id'], $datos['huella'], $datos['creada'], $datos['ultimo'], $datos['csrf'])) {
             $this->cerrar(); // cookie obsoleta o inventada: se borra
             return null;
         }
@@ -153,6 +155,12 @@ final class Sesion
             return null;
         }
         return $this->datos = $datos;
+    }
+
+    /** Huella corta de clave_hash: basta para detectar el cambio y no expone el hash en la carpeta de sesiones. */
+    private static function huella(string $claveHash): string
+    {
+        return substr(hash('sha256', $claveHash), 0, 16);
     }
 
     private function ahora(): int

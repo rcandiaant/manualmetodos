@@ -201,8 +201,14 @@ final class AdminCtl
             $this->consulta->guardar($apertura, $cierre, $motivo);
         } elseif ($mismas) {
             $this->consulta->guardarMotivo($motivo);
+        } elseif ($actual['etapa'] === Etapa::CONSULTA && $actual['apertura'] === Consulta::iso($apertura)
+            && $actual['cierre'] !== null && Consulta::iso($cierre) > $actual['cierre'] && $cierre > $this->reloj->ahora()) {
+            // «Ampliamos una semana»: durante la consulta solo se puede atrasar el cierre. No altera ninguna
+            // etapa ya vivida; acortarlo o mover la apertura sí lo haría (409, abajo).
+            // Las fechas ISO en UTC con «Z» y el mismo formato se comparan bien como texto.
+            $this->consulta->guardar($apertura, $cierre, $motivo);
         } else {
-            throw new ErrorHttp(409, 'etapa_no_permite', 'Las fechas solo se pueden cambiar antes de la apertura; el motivo obligatorio sí.');
+            throw new ErrorHttp(409, 'etapa_no_permite', 'Las fechas solo se pueden cambiar antes de la apertura; durante la consulta solo se puede extender el cierre. El motivo obligatorio sí se puede cambiar.');
         }
         $nuevo = $this->consulta->dto();
         $this->auditoria->registrar($admin['id'], 'actualizar_consulta', 'consulta', 1, [

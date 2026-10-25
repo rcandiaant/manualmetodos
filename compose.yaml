@@ -38,7 +38,7 @@ services:
       retries: 20
 
   composer:
-    image: composer:2
+    build: docker/php
     entrypoint: ["composer"]
     volumes:
       - ./servidor:/app

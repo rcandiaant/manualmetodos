@@ -11,6 +11,7 @@ use Manual\Pruebas\Soporte\AlmacenSesionMemoria;
 use Manual\Pruebas\Soporte\BaseDePruebas;
 use Manual\Pruebas\Soporte\ClienteApi;
 use Manual\Pruebas\Soporte\RelojFijo;
+use Manual\Seguridad\LimiteIntentos;
 use PHPUnit\Framework\TestCase;
 
 final class SesionTest extends TestCase
@@ -288,12 +289,20 @@ final class SesionTest extends TestCase
 
     public function test_bloqueo_por_ip_entre_cuentas(): void
     {
+        $this->assertSame(20, LimiteIntentos::UMBRAL_IP);
+        $this->assertSame(5, LimiteIntentos::UMBRAL_CUENTA);
         $otro = $this->crearUsuario();
         $c = $this->cliente('10.0.2.1');
-        for ($i = 1; $i <= 5; $i++) {
-            $this->login($c, "victima$i@lab.cl", 'mala');
+        // Tras una NAT institucional, 5 errores de distintas personas no bloquean la IP compartida.
+        for ($i = 1; $i <= 19; $i++) {
+            $this->assertError(401, 'credenciales_invalidas', $this->login($c, "victima$i@lab.cl", 'mala'), "fallo $i");
         }
-        $this->assertError(429, 'demasiados_intentos', $this->login($c, $otro['correo'], $otro['clave']));
+        $this->assertSame(200, $this->login($c, $otro['correo'], $otro['clave'])->estado, '19 fallos de la IP aún no bloquean');
+        // El éxito devuelve su reserva: la IP sigue con 19 y el fallo 20 la bloquea.
+        $this->assertError(401, 'credenciales_invalidas', $this->login($c, 'victima20@lab.cl', 'mala'));
+        $r = $this->login($c, $otro['correo'], $otro['clave']);
+        $this->assertError(429, 'demasiados_intentos', $r);
+        $this->assertSame('60', $r->cabeceras['Retry-After'] ?? null);
         $this->assertSame(200, $this->login($this->cliente('10.0.2.2'), $otro['correo'], $otro['clave'])->estado);
     }
 
@@ -431,5 +440,30 @@ final class SesionTest extends TestCase
         $this->assertSame(200, $r->estado);
         $this->assertSame($rev['id'], $r->datos['id']);
         $this->assertSame(['revisor'], $r->datos['roles']);
+    }
+
+    public function test_la_sesion_guarda_una_huella_de_la_clave_y_cae_si_cambia(): void
+    {
+        $u = $this->crearUsuario();
+        $c = $this->cliente()->comoUsuario($u);
+        $hash = (string) self::$bd->query('SELECT clave_hash FROM usuarios WHERE id = ' . $u['id'])->fetchColumn();
+        $datos = $this->sesiones->sesiones[$c->cookie];
+        $this->assertSame(substr(hash('sha256', $hash), 0, 16), $datos['huella']);
+        $this->assertStringNotContainsString($hash, (string) json_encode($datos), 'la sesión no guarda el hash');
+
+        // El mismo hash (p. ej. reactivar la cuenta) no la invalida; uno distinto sí, y la destruye.
+        $this->assertSame(200, $c->get('/api/sesion')->estado);
+        $id = $c->cookie;
+        self::$bd->prepare('UPDATE usuarios SET clave_hash = ? WHERE id = ?')->execute([$hash . 'x', $u['id']]);
+        $this->assertError(401, 'sin_sesion', $c->get('/api/sesion'));
+        $this->assertArrayNotHasKey((string) $id, $this->sesiones->sesiones);
+    }
+
+    public function test_sesion_sin_huella_no_se_acepta(): void
+    {
+        $u = $this->crearUsuario();
+        $c = $this->cliente()->comoUsuario($u);
+        unset($this->sesiones->sesiones[$c->cookie]['huella']);
+        $this->assertError(401, 'sin_sesion', $c->get('/api/sesion'));
     }
 }

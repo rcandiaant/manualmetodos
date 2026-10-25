@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Manual\Pruebas\Api;
 
 use Manual\Acceso\Capitulos;
+use Manual\Acceso\Copias;
 use Manual\Aplicacion;
 use Manual\Pruebas\Soporte\BaseDePruebas;
 use Manual\Pruebas\Soporte\ClienteApi;
@@ -435,6 +436,54 @@ final class LaboratorioTest extends TestCase
         [$otro] = $this->lab();
         self::assertSame(200, $this->guardar($otro, $cap, $ver, [])->estado);
         self::assertCount(3, $revisiones());
+    }
+
+    public function test_se_conservan_solo_las_ultimas_20_instantaneas_por_copia(): void
+    {
+        [$cap, $ver] = $this->escenario();
+        [$c, $u] = $this->lab();
+        [$otro, $uOtro] = $this->lab();
+        self::assertSame(200, $this->guardar($otro, $cap, $ver, [], $this->docModificado('otro'))->estado);
+
+        for ($i = 1; $i <= 25; $i++) {
+            $this->reloj->avanzar(11 * 60);
+            self::assertSame(200, $this->guardar($c, $cap, $ver, [], $this->docModificado("t$i"))->estado, "guardado $i");
+        }
+        $mias = self::$bd->prepare('SELECT doc_json FROM revisiones_copia WHERE usuario_id = ? AND capitulo_id = ? ORDER BY creado, id');
+        $mias->execute([$u['id'], $cap]);
+        $docs = $mias->fetchAll(\PDO::FETCH_COLUMN);
+        self::assertCount(Copias::MAX_INSTANTANEAS, $docs);
+        self::assertSame(20, Copias::MAX_INSTANTANEAS);
+        self::assertStringContainsString('"t6"', $docs[0], 'se borran las más antiguas');
+        self::assertStringContainsString('"t25"', $docs[19]);
+        // Las de otro laboratorio no se tocan.
+        $st = self::$bd->prepare('SELECT COUNT(*) FROM revisiones_copia WHERE usuario_id = ?');
+        $st->execute([$uOtro['id']]);
+        self::assertSame(1, (int) $st->fetchColumn());
+    }
+
+    public function test_guardado_concurrente_de_la_misma_copia_da_409_y_no_cambia_nada(): void
+    {
+        [$cap, $ver] = $this->escenario();
+        [$c, , $autor] = $this->lab();
+        self::assertSame(200, $this->guardar($c, $cap, $ver, [$this->sug($autor, 'a')], $this->docModificado('v1'))->estado);
+        $antes = $c->get("/capitulos/$cap/copia")->cuerpo();
+
+        // Simula lo que ve el segundo guardado cuando InnoDB elige su transacción como víctima de un
+        // interbloqueo (1213) o agota la espera del bloqueo de la fila (1205).
+        foreach ([1213, 1205] as $errno) {
+            $this->reloj->avanzar(60);
+            self::$bd->exec("CREATE TRIGGER t_choque BEFORE INSERT ON sugerencias FOR EACH ROW SIGNAL SQLSTATE '40001' SET MYSQL_ERRNO = $errno, MESSAGE_TEXT = 'choque'");
+            try {
+                $r = $this->guardar($c, $cap, $ver, [$this->sug($autor, 'b')], $this->docModificado('v2'));
+            } finally {
+                self::$bd->exec('DROP TRIGGER IF EXISTS t_choque');
+            }
+            self::assertSame(409, $r->estado, "errno $errno: " . $r->cuerpo());
+            self::assertSame('conflicto_concurrente', $r->datos['error']['codigo']);
+            self::assertSame($antes, $c->get("/capitulos/$cap/copia")->cuerpo(), 'rollback completo');
+        }
+        self::assertSame(200, $this->guardar($c, $cap, $ver, [$this->sug($autor, 'b')], $this->docModificado('v2'))->estado, 'al reintentar funciona');
     }
 
     public function test_uids_que_solo_difieren_en_mayusculas_coexisten(): void

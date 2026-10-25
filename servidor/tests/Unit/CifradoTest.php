@@ -92,6 +92,16 @@ final class CifradoTest extends TestCase
         $this->assertSame(password_get_info(Claves::hash('x'))['options'], password_get_info(Claves::HASH_FICTICIO)['options']);
     }
 
+    public function test_argon2id_con_parametros_acotados_para_el_hosting(): void
+    {
+        // 19 MiB y 2 pasadas (mínimo OWASP): con 64 MiB por hash, ~8 logins simultáneos llenarían la LVE de 512 MB.
+        $esperado = ['memory_cost' => 19456, 'time_cost' => 2, 'threads' => 1];
+        $this->assertSame($esperado, Claves::ARGON2ID);
+        $this->assertSame($esperado, password_get_info(Claves::hash('x'))['options']);
+        $this->assertSame($esperado, password_get_info(Claves::HASH_FICTICIO)['options']);
+        $this->assertTrue(Claves::verificar('x', Claves::hash('x')));
+    }
+
     public function test_sin_argon2id_usa_bcrypt(): void
     {
         $this->assertSame('argon2id', Claves::algoritmo(true));

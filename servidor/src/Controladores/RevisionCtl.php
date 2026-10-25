@@ -168,7 +168,8 @@ final class RevisionCtl
         if ($v === null) {
             return null;
         }
-        return Entrada::texto($e, 'notaResolucion', self::MAX_NOTA, 0) === '' ? null : $v;
+        $nota = Entrada::texto($e, 'notaResolucion', self::MAX_NOTA, 0);
+        return $nota === '' ? null : $nota;
     }
 
     private function capituloExistente(array $params): int

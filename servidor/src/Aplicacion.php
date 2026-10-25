@@ -102,7 +102,7 @@ final class Aplicacion
         $this->ruta('PUT', '/api/capitulos/{id}/final', fn (Peticion $p, array $a) => $this->revisionCtl()->guardarFinal($p, $a));
         $this->ruta('GET', '/api/capitulos/{id}/final', fn (Peticion $p, array $a) => $this->revisionCtl()->verFinal($p, $a));
 
-        $this->ruta('POST', '/api/admin/capitulos',fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
+        $this->ruta('POST', '/api/admin/capitulos', fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
         $this->ruta('GET', '/api/admin/usuarios', fn (Peticion $p) => $this->adminCtl()->listarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/importar', fn (Peticion $p) => $this->adminCtl()->importarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/{id}/clave', fn (Peticion $p, array $a) => $this->adminCtl()->regenerarClave($p, $a));

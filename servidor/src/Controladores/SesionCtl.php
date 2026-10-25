@@ -74,7 +74,7 @@ final class SesionCtl
 
         $this->limite->confirmarExito($claves);
         $csrf = Csrf::generar();
-        $this->sesion->iniciar($u['id'], $csrf);
+        $this->sesion->iniciar($u['id'], $u['clave_hash'], $csrf);
         $this->auditoria->registrar($u['id'], 'inicio_sesion', 'usuario', $u['id'], ['ip' => $p->ip]);
         return Respuesta::json(200, ['usuario' => Usuarios::dto($u), 'csrf' => $csrf]);
     }

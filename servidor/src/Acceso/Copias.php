@@ -13,6 +13,8 @@ final class Copias
 {
     /** Se guarda una instantánea si la última tiene más de 10 minutos (o no hay ninguna). */
     public const INTERVALO_INSTANTANEA = 600;
+    /** Retención acotada (spec §6.6): solo las últimas N instantáneas por (usuario, capítulo). */
+    public const MAX_INSTANTANEAS = 20;
 
     public function __construct(private readonly \PDO $bd, private readonly Sugerencias $sugerencias)
     {
@@ -62,6 +64,18 @@ final class Copias
             if ($toca) {
                 $this->bd->prepare('INSERT INTO revisiones_copia (usuario_id, capitulo_id, doc_json, creado) VALUES (?, ?, ?, ?)')
                     ->execute([$usuarioId, $capituloId, $docJson, $fecha]);
+                // Se borran las más antiguas, en la misma transacción. La fila de la copia ya está
+                // bloqueada por el upsert, así que no hay carreras entre guardados del mismo laboratorio.
+                $st = $this->bd->prepare(
+                    'SELECT id FROM revisiones_copia WHERE usuario_id = ? AND capitulo_id = ?
+                     ORDER BY id DESC LIMIT 1 OFFSET ' . (self::MAX_INSTANTANEAS - 1)
+                );
+                $st->execute([$usuarioId, $capituloId]);
+                $corte = $st->fetchColumn();
+                if ($corte !== false) {
+                    $this->bd->prepare('DELETE FROM revisiones_copia WHERE usuario_id = ? AND capitulo_id = ? AND id < ?')
+                        ->execute([$usuarioId, $capituloId, (int) $corte]);
+                }
             }
             $this->bd->commit();
         } catch (\Throwable $e) {

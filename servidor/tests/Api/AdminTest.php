@@ -172,6 +172,36 @@ final class AdminTest extends TestCase
         self::assertSame(404, $c->post('/admin/usuarios/99999/clave', [])->estado);
     }
 
+    public function test_regenerar_clave_cierra_las_sesiones_abiertas_de_esa_cuenta(): void
+    {
+        [$c] = $this->admin();
+        $u = $this->crearUsuario(['correo' => 'lab@lab.cl']);
+        $otro = $this->crearUsuario();
+        $sesionLab = $this->cliente($u);
+        $otraPestana = $this->cliente($u);
+        $escritor = $this->cliente($u);
+        $sesionOtro = $this->cliente($otro);
+        self::assertSame(200, $sesionLab->get('/sesion')->estado);
+
+        $nueva = $c->post("/admin/usuarios/{$u['id']}/clave", [])->datos['clave'];
+
+        foreach ([$sesionLab, $otraPestana] as $s) {
+            $r = $s->get('/sesion');
+            self::assertSame(401, $r->estado);
+            self::assertSame('sin_sesion', $r->datos['error']['codigo']);
+            self::assertNull($s->cookie, 'la cookie se borra');
+        }
+        // Las escrituras también quedan fuera aunque la pestaña conserve su token CSRF.
+        $r = $escritor->post('/capitulos/1/comentarios', ['bloqueId' => 'p1', 'texto' => 'hola']);
+        self::assertSame(401, $r->estado, $r->cuerpo());
+        self::assertSame('sin_sesion', $r->datos['error']['codigo']);
+        // Otras cuentas y el propio admin siguen dentro; con la clave nueva se vuelve a entrar.
+        self::assertSame(200, $sesionOtro->get('/sesion')->estado);
+        self::assertSame(200, $c->get('/sesion')->estado);
+        $n = (new ClienteApi($this->app))->comoUsuario(['correo' => 'lab@lab.cl', 'clave' => $nueva]);
+        self::assertSame(200, $n->get('/sesion')->estado);
+    }
+
     public function test_desactivar_impide_login(): void
     {
         [$c, $a] = $this->admin();
@@ -352,6 +382,46 @@ final class AdminTest extends TestCase
         $c = $this->cliente($a);
         self::assertSame(200, $c->put('/admin/consulta', ['apertura' => '2026-11-02T12:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => false])->estado);
         self::assertSame(409, $c->put('/admin/consulta', ['apertura' => '2026-11-02T12:00:00Z', 'cierre' => '2026-12-30T00:00:00Z', 'motivoObligatorio' => false])->estado);
+    }
+
+    public function test_en_consulta_solo_se_puede_extender_el_cierre(): void
+    {
+        [$c, $a] = $this->admin();
+        $apertura = '2026-11-02T12:00:00Z';
+        self::assertSame(200, $c->put('/admin/consulta', ['apertura' => $apertura, 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => false])->estado);
+        $this->reloj->avanzar(86400);
+        $c = $this->cliente($a);
+        $cierreBd = fn () => self::$bd->query('SELECT cierre FROM consulta')->fetchColumn();
+
+        // Extender: misma apertura (en cualquier zona), cierre más tarde. El motivo viaja igual.
+        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-02T09:00:00-03:00', 'cierre' => '2026-12-07T00:00:00Z', 'motivoObligatorio' => true]);
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertSame('2026-12-07T00:00:00Z', $r->datos['cierre']);
+        self::assertSame($apertura, $r->datos['apertura']);
+        self::assertSame('consulta', $r->datos['etapa']);
+        self::assertTrue($r->datos['motivoObligatorio']);
+        self::assertSame('2026-12-07 00:00:00', $cierreBd());
+        $aud = $this->auditoria('actualizar_consulta');
+        self::assertStringContainsString('2026-12-07T00:00:00Z', (string) end($aud)['detalle']);
+
+        foreach ([
+            'acortar' => ['apertura' => $apertura, 'cierre' => '2026-12-06T00:00:00Z'],
+            'acortar a antes de ahora' => ['apertura' => $apertura, 'cierre' => '2026-11-03T11:00:00Z'],
+            'mover la apertura' => ['apertura' => '2026-11-01T12:00:00Z', 'cierre' => '2026-12-07T00:00:00Z'],
+            'mover la apertura y extender' => ['apertura' => '2026-11-03T00:00:00Z', 'cierre' => '2026-12-20T00:00:00Z'],
+        ] as $caso => $fechas) {
+            $r = $c->put('/admin/consulta', $fechas + ['motivoObligatorio' => true]);
+            self::assertSame(409, $r->estado, $caso);
+            self::assertSame('etapa_no_permite', $r->datos['error']['codigo'], $caso);
+        }
+        self::assertSame('2026-12-07 00:00:00', $cierreBd());
+        self::assertSame('2026-11-02 12:00:00', self::$bd->query('SELECT apertura FROM consulta')->fetchColumn());
+
+        // Cerrada la consulta, ya no se extiende (reabrirla cambiaría una etapa ya vivida).
+        $this->reloj->avanzar(40 * 86400);
+        $c = $this->cliente($a);
+        self::assertSame(409, $c->put('/admin/consulta', ['apertura' => $apertura, 'cierre' => '2027-02-01T00:00:00Z', 'motivoObligatorio' => true])->estado);
+        self::assertSame('2026-12-07 00:00:00', $cierreBd());
     }
 
     public function test_abrir_ahora_es_valido_y_el_error_senala_el_campo(): void

@@ -15,4 +15,17 @@ Options -Indexes
 </FilesMatch>
 
 RewriteEngine On
+
+# HTTPS obligatorio: toda visita por http:// se redirige (301) a https:// antes de servir nada.
+# Sin esto la HSTS solo protege desde la segunda visita, y con COOKIE_SEGURA=1 el navegador descarta
+# la cookie __Host- en HTTP: el login daría 200 pero la sesión no persistiría.
+# Se exceptúa localhost/127.0.0.1 (desarrollo en http://localhost:8080). La guarda va por Host y no por
+# una variable de SetEnv porque en .htaccess SetEnv se aplica después de mod_rewrite.
+# Equivale a «Force HTTPS Redirect» del dominio en cPanel; tener ambos activos no causa problemas.
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP_HOST} !^(localhost|127\.0\.0\.1)(:[0-9]+)?$ [NC]
+# Se descarta el puerto (p. ej. «dominio:80»): %1 es el host sin él.
+RewriteCond %{HTTP_HOST} ^([^:]+)
+RewriteRule ^ https://%1%{REQUEST_URI} [R=301,L]
+
 RewriteRule ^api/ index.php [L,QSA]
