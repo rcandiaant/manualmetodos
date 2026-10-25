@@ -1,0 +1,4 @@
+*.sh text eol=lf
+docker/** text eol=lf
+compose.yaml text eol=lf
+servidor/**/*.php text eol=lf

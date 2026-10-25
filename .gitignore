@@ -26,3 +26,8 @@ dist/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Servidor PHP
+servidor/vendor/
+servidor/.env
+servidor/.phpunit.cache/

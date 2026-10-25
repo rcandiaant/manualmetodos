@@ -1,0 +1,20 @@
+{
+    "name": "inia/manual-metodos-servidor",
+    "description": "Servidor de la plataforma de consulta del Manual de métodos",
+    "type": "project",
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11"
+    },
+    "autoload": {
+        "psr-4": {
+            "Manual\\": "src/",
+            "Manual\\Pruebas\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

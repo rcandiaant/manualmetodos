@@ -1,0 +1,5 @@
+CREATE DATABASE IF NOT EXISTS manual CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS manual_pruebas CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON manual.* TO 'manual'@'%';
+GRANT ALL PRIVILEGES ON manual_pruebas.* TO 'manual'@'%';
+FLUSH PRIVILEGES;
