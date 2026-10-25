@@ -1,0 +1,49 @@
+name: manualmetodos
+
+services:
+  php:
+    build: docker/php
+    volumes:
+      - ./servidor:/app
+      - ./docker/php/desarrollo.ini:/usr/local/etc/php/conf.d/zz-desarrollo.ini:ro
+    ports:
+      - "8080:80"
+    # SOLO DESARROLLO — nunca usar en producción
+    environment:
+      BD_HOST: bd
+      BD_NOMBRE: manual
+      BD_NOMBRE_PRUEBAS: manual_pruebas
+      BD_USUARIO: manual
+      BD_CLAVE: manual_dev
+      CLAVE_CIFRADO: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+      CLAVE_INDICE: YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=
+    depends_on:
+      bd:
+        condition: service_healthy
+
+  bd:
+    # SOLO DESARROLLO — nunca usar en producción
+    image: mariadb:10.6
+    environment:
+      MARIADB_ROOT_PASSWORD: root_dev
+      MARIADB_USER: manual
+      MARIADB_PASSWORD: manual_dev
+    volumes:
+      - bd_datos:/var/lib/mysql
+      - ./docker/bd:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  composer:
+    build: docker/php
+    entrypoint: ["composer"]
+    volumes:
+      - ./servidor:/app
+    working_dir: /app
+    profiles: ["herramientas"]
+
+volumes:
+  bd_datos:

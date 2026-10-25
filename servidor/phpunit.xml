@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         failOnWarning="true"
+         failOnRisky="true">
+    <php>
+        <!-- Valores por defecto: no pisan variables ya definidas (compose usa BD_HOST=bd; el CI usa 127.0.0.1).
+             Para otro servidor completo: BD_PRUEBAS_DSN="mysql:host=...;dbname=algo_pruebas;charset=utf8mb4". -->
+        <env name="BD_HOST" value="127.0.0.1"/>
+        <env name="BD_NOMBRE_PRUEBAS" value="manual_pruebas"/>
+    </php>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Api">
+            <directory>tests/Api</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

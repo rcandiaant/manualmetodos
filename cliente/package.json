@@ -8,6 +8,7 @@
     "test": "vitest run",
     "verificar": "tsx scripts/verificar-capitulos.ts",
     "escala": "tsx scripts/escala.ts",
+    "exportar-esquema": "tsx scripts/exportar-esquema.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

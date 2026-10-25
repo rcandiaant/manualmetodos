@@ -1,0 +1,188 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "analito",
+      "content": [
+        {
+          "type": "text",
+          "text": "Analito de ejemplo"
+        }
+      ]
+    },
+    {
+      "type": "metodo",
+      "content": [
+        {
+          "type": "text",
+          "text": "Método ficticio B"
+        }
+      ]
+    },
+    {
+      "type": "parrafo",
+      "attrs": {
+        "bid": "f2-p1",
+        "pegado": false
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "La concentración se calcula con la ecuación "
+        },
+        {
+          "type": "referencia",
+          "attrs": {
+            "etiqueta": "eq:ejemplo"
+          }
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
+      "type": "ecuacion",
+      "attrs": {
+        "latex": "C = \\frac{A - B}{m}",
+        "bid": "f2-e1",
+        "pegado": true
+      }
+    },
+    {
+      "type": "tabla",
+      "attrs": {
+        "columnas": "l c",
+        "pegado": false
+      },
+      "content": [
+        {
+          "type": "filaTabla",
+          "content": [
+            {
+              "type": "celda",
+              "attrs": {
+                "bid": "f2-c1"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Reactivo",
+                  "marks": [
+                    {
+                      "type": "negrita"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "celda",
+              "attrs": {
+                "bid": "f2-c2"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Cantidad",
+                  "marks": [
+                    {
+                      "type": "negrita"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "filaTabla",
+          "content": [
+            {
+              "type": "celda",
+              "attrs": {
+                "bid": "f2-c3"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Solución tampón"
+                }
+              ]
+            },
+            {
+              "type": "celda",
+              "attrs": {
+                "bid": "f2-c4"
+              },
+              "content": [
+                {
+                  "type": "matematica",
+                  "attrs": {
+                    "latex": "10\\,\\mathrm{mL}"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "filaTabla",
+          "content": [
+            {
+              "type": "celda",
+              "attrs": {
+                "bid": "f2-c5"
+              },
+              "content": []
+            },
+            {
+              "type": "celda",
+              "attrs": {
+                "bid": "f2-c6"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "—"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "especial",
+      "attrs": {
+        "latex": "\\begin{center}\\rule{2cm}{0.4pt}\\end{center}",
+        "bid": "f2-x1",
+        "pegado": false
+      }
+    },
+    {
+      "type": "parrafo",
+      "attrs": {
+        "bid": null,
+        "pegado": false
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Comando sin equivalente: "
+        },
+        {
+          "type": "especialInline",
+          "attrs": {
+            "latex": "\\hfill"
+          }
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+Options -Indexes
+
+<IfModule mod_headers.c>
+    # La API ya emite sus propias cabeceras desde PHP; evita duplicarlas.
+    SetEnvIf Request_URI "^/api/" es_api
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" env=!REDIRECT_es_api
+    Header always set X-Content-Type-Options "nosniff" env=!REDIRECT_es_api
+    Header always set Referrer-Policy "same-origin" env=!REDIRECT_es_api
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()" env=!REDIRECT_es_api
+    Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on' && -z %{ENV:REDIRECT_es_api}"
+</IfModule>
+
+<FilesMatch "(\.(env|sql|lock)|^composer\.json)$">
+    Require all denied
+</FilesMatch>
+
+RewriteEngine On
+
+# HTTPS obligatorio: toda visita por http:// se redirige (301) a https:// antes de servir nada.
+# Sin esto la HSTS solo protege desde la segunda visita, y con COOKIE_SEGURA=1 el navegador descarta
+# la cookie __Host- en HTTP: el login daría 200 pero la sesión no persistiría.
+# Se exceptúa localhost/127.0.0.1 (desarrollo en http://localhost:8080). La guarda va por Host y no por
+# una variable de SetEnv porque en .htaccess SetEnv se aplica después de mod_rewrite.
+# Equivale a «Force HTTPS Redirect» del dominio en cPanel; tener ambos activos no causa problemas.
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP_HOST} !^(localhost|127\.0\.0\.1)(:[0-9]+)?$ [NC]
+# Se descarta el puerto (p. ej. «dominio:80»): %1 es el host sin él.
+RewriteCond %{HTTP_HOST} ^([^:]+)
+RewriteRule ^ https://%1%{REQUEST_URI} [R=301,L]
+
+RewriteRule ^api/ index.php [L,QSA]
