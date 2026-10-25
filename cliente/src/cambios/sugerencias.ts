@@ -105,7 +105,18 @@ function diffBloque(
   return res;
 }
 
+/**
+ * Juego de caracteres de `autor` (el token de laboratorio que fija el servidor): así el id
+ * `${autor}:${bloqueId}:${hash}` cumple siempre la regla de 1B (≤190, `[A-Za-z0-9:@+_-]`).
+ */
+export const AUTOR_VALIDO = /^[A-Za-z0-9@+_-]{1,60}$/;
+
 export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string): Sugerencia[] {
+  if (!AUTOR_VALIDO.test(autor)) {
+    throw new Error(
+      `Autor inválido: «${autor}». Debe tener de 1 a 60 caracteres de [A-Za-z0-9@+_-] (el token del laboratorio).`,
+    );
+  }
   const bloquesBase = new Map<string, DocJSON>();
   for (const b of listarBloques(base)) if (b.bid !== null) bloquesBase.set(b.bid, b.nodo);
 
@@ -162,32 +173,42 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
 
   /** Ancestros del nodo visitado, desde `doc`: `pila[d + 1]` tiene profundidad `d`. */
   const pila: DocJSON[] = [];
+  /** Bloques existentes visitados hasta ahora (para saber si un hermano previo tenía alguno). */
+  let existentes = 0;
   /** Inserciones emitidas que aún esperan su `siguiente`, con el padre de su nodo en la copia. */
-  let pendientes: { s: Sugerencia; padre: DocJSON; esPrimero: boolean }[] = [];
+  let pendientes: { s: Sugerencia; padre: DocJSON; enCadena: boolean }[] = [];
 
   /**
    * Al ver un bloque existente: es el `siguiente` de las inserciones pendientes. Una
-   * inserción primer hijo (padre no `doc`) se marca `primerHijo` si el ancestro de ese
-   * bloque a su misma profundidad es hijo de su mismo padre; si no, queda anclada al anterior.
-   * Ese respaldo es prácticamente inalcanzable con padre ≠ `doc`: si el padre contiene un
-   * bloque existente, `siguiente` está dentro de él; si no, el padre entero es `esNuevo`.
+   * inserción de la cadena de primeros hijos de su padre (padre no `doc`; ningún hermano
+   * previo contiene un bloque existente) se marca `primerHijo` si el ancestro de ese bloque
+   * a su misma profundidad es hijo de su mismo padre: se ubica antes de ese ancestro, no
+   * tras el ancla (que vive en otro contenedor). TODA la cadena se marca, no solo el primer
+   * hijo: si el revisor acepta solo parte de ella, cada miembro sigue sabiendo su contenedor (C1).
+   * Si no, queda anclada al anterior. Ese respaldo es prácticamente inalcanzable con
+   * padre ≠ `doc`: si el padre contiene un bloque existente, `siguiente` está dentro de él;
+   * si no, el padre entero es `esNuevo`.
    */
   const resolverPendientes = (bid: string) => {
-    for (const { s, padre, esPrimero } of pendientes) {
+    for (const { s, padre, enCadena } of pendientes) {
       s.siguiente = bid;
       const prof = s.profundidad as number;
-      if (esPrimero && padre.type !== 'doc' && pila[prof] === padre && pila[prof + 1] !== undefined) {
+      if (enCadena && padre.type !== 'doc' && pila[prof] === padre && pila[prof + 1] !== undefined) {
         s.primerHijo = true;
       }
     }
     pendientes = [];
   };
 
-  /** `prof`: ancestros de `n` sin contar `doc` (el doc se visita con -1). */
-  const visitar = (n: DocJSON, prof: number, padre: DocJSON | null, esPrimero: boolean) => {
+  /**
+   * `prof`: ancestros de `n` sin contar `doc` (el doc se visita con -1). `enCadena`: ningún
+   * hermano previo de `n` contenía un bloque existente.
+   */
+  const visitar = (n: DocJSON, prof: number, padre: DocJSON | null, enCadena: boolean) => {
     if (esBloque(n) && esExistente(n)) {
       const bid = bidDe(n) as string;
       vistos.add(bid);
+      existentes++;
       pila.push(n);
       resolverPendientes(bid);
       pila.pop();
@@ -217,11 +238,12 @@ export function calcularSugerencias(base: DocJSON, copia: DocJSON, autor: string
         for (const bid of propios) grupoDe.set(bid, s.grupo);
       }
       res.push(s);
-      pendientes.push({ s, padre, esPrimero });
+      pendientes.push({ s, padre, enCadena });
       return;
     }
     pila.push(n);
-    (n.content ?? []).forEach((h, i) => visitar(h, prof + 1, n, i === 0));
+    const alEntrar = existentes;
+    for (const h of n.content ?? []) visitar(h, prof + 1, n, existentes === alEntrar);
     pila.pop();
   };
   visitar(copia, -1, null, false);

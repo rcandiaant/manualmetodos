@@ -33,9 +33,12 @@ export interface Sugerencia {
    */
   siguiente?: string;
   /**
-   * Solo en `bloque-insertado`: `propuesta[0]` es el primer hijo de un contenedor
-   * (no `doc`) y se inserta antes del ancestro de `siguiente` de profundidad
-   * `profundidad`, en vez de tras el ancla.
+   * Solo en `bloque-insertado`: `propuesta[0]` pertenece a la cadena de primeros hijos
+   * de un contenedor (no `doc`): en la copia, ningún hermano anterior contiene un bloque
+   * existente. Se inserta justo antes del ancestro de `siguiente` de profundidad
+   * `profundidad` (es decir, tras el último miembro aceptado de la misma cadena), en vez
+   * de tras el ancla, que vive en otro contenedor. Lo lleva toda la cadena, no solo el
+   * primer hijo, para que una aceptación parcial no cambie el contenedor (C1).
    */
   primerHijo?: true;
   /**

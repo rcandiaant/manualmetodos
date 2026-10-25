@@ -7,6 +7,7 @@
     "dev": "vite",
     "test": "vitest run",
     "verificar": "tsx scripts/verificar-capitulos.ts",
+    "escala": "tsx scripts/escala.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

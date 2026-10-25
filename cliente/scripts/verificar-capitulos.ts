@@ -3,7 +3,6 @@
  * Uso: npm run verificar [-- --sin-compilar]
  * Lee ../manual-fuente/tex/*.tex; escribe ../manual-fuente/_reportes/ (fuera de git).
  */
-import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +11,7 @@ import { exportarLatex } from '../src/latex/exportar';
 import { compararLatex } from '../src/latex/normalizar';
 import { validarDocumento } from '../src/esquema/esquema';
 import type { DocJSON } from '../src/tipos';
-import { extraerReferenciasIndefinidas } from './log-latex';
+import { compilar } from './compilacion';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const RAIZ = resolve(AQUI, '..', '..');
@@ -21,7 +20,6 @@ const REPORTES = join(RAIZ, 'manual-fuente', '_reportes');
 const EXPORTADOS = join(REPORTES, 'exportados');
 const COMPILACION = join(REPORTES, 'compilacion');
 const MARCO = resolve(AQUI, '..', 'herramientas', 'marco-prueba.tex');
-const TIMEOUT_MS = 60_000;
 
 const sinCompilar = process.argv.includes('--sin-compilar');
 
@@ -45,32 +43,6 @@ function especiales(n: DocJSON, acc: Especial[] = []): Especial[] {
   }
   for (const h of n.content ?? []) especiales(h, acc);
   return acc;
-}
-
-interface Compilacion {
-  ok: boolean;
-  sinResolver: string[];
-  detalle?: string;
-}
-
-/** Compila `<nombre>.tex` (en COMPILACION) dos veces con el marco; cuenta `\ref` sin resolver. */
-function compilar(nombre: string): Compilacion {
-  const args = [
-    '-interaction=nonstopmode',
-    '-halt-on-error',
-    '-max-print-line=10000',
-    `-jobname=${nombre}`,
-    `\\def\\capitulo{${nombre}}\\input{marco-prueba}`,
-  ];
-  for (let pasada = 1; pasada <= 2; pasada++) {
-    const r = spawnSync('pdflatex', args, { cwd: COMPILACION, timeout: TIMEOUT_MS, encoding: 'utf8' });
-    if (r.error || r.status !== 0) {
-      const detalle = r.error ? String(r.error.message) : `pdflatex salió con código ${r.status} (pasada ${pasada})`;
-      return { ok: false, sinResolver: [], detalle };
-    }
-  }
-  const log = readFileSync(join(COMPILACION, `${nombre}.log`), 'utf8');
-  return { ok: true, sinResolver: extraerReferenciasIndefinidas(log) };
 }
 
 interface Fila {
@@ -138,8 +110,8 @@ function main(): number {
       const id = String(idx + 1).padStart(2, '0');
       writeFileSync(join(COMPILACION, `orig${id}.tex`), original, 'utf8');
       writeFileSync(join(COMPILACION, `exp${id}.tex`), exportado, 'utf8');
-      const co = compilar(`orig${id}`);
-      const ce = compilar(`exp${id}`);
+      const co = compilar(COMPILACION, `orig${id}`);
+      const ce = compilar(COMPILACION, `exp${id}`);
       fila.e = co.ok && ce.ok;
       fila.detalleE = [co.ok ? '' : `original: ${co.detalle}`, ce.ok ? '' : `exportado: ${ce.detalle}`]
         .filter(Boolean)

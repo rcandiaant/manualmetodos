@@ -324,7 +324,7 @@ describe('inserción como primer hijo de un contenedor', () => {
   const tabla = (...filas: DocJSON[]): DocJSON => ({ type: 'tabla', attrs: { columnas: 'll' }, content: filas });
   const nota = (...bloques: DocJSON[]): DocJSON => ({ type: 'notaPie', attrs: { bloques } });
 
-  it('emite siguiente en toda inserción y primerHijo solo en el primer hijo', () => {
+  it('emite siguiente en toda inserción y primerHijo solo en la cadena de primeros hijos', () => {
     const base = doc(parrafo('p0', 'a'), lista(item(null, parrafo('i1', 'b'))), parrafo('p2', 'c'));
     const copia = doc(
       parrafo('p0', 'a'),

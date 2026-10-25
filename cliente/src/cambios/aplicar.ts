@@ -148,8 +148,12 @@ function admite(padre: DocJSON, indice: number, tipo: string): boolean {
  * ancestro del predecesor cuya profundidad es `profundidad` (R13). Sin `profundidad`,
  * como hermano del primer ancestro cuyo padre admite el tipo insertado (R4).
  * Una inserción `primerHijo` se ubica, en cambio, justo antes del ancestro de su bloque
- * `siguiente` cuya profundidad es `profundidad`; las siguientes se encadenan tras ella.
- * Si `siguiente` falta o lo elimina otra sugerencia aceptada (`eliminados`), lanza error.
+ * `siguiente` cuya profundidad es `profundidad`. Toda la cadena de primeros hijos lleva
+ * `primerHijo` y se aplica en orden ascendente, así que cada miembro queda tras el último
+ * miembro aceptado de su cadena o, si no se aceptó ninguno, como primer hijo: la
+ * aceptación parcial no cambia el contenedor (C1).
+ * Si `siguiente` falta o lo elimina otra sugerencia aceptada (`eliminados`), o el lugar no
+ * es válido según el esquema, lanza error visible (nunca ubica en otro sitio).
  */
 function insertarEnAncla(raiz: DocJSON, ancla: string, sugs: Sugerencia[], eliminados: Set<string>): void {
   let previo: DocJSON | null = null;
@@ -302,6 +306,28 @@ function validarGrupos(base: DocJSON, aceptadas: Sugerencia[]): void {
   }
 }
 
+/**
+ * Aplica sobre una copia de `base` las sugerencias aceptadas y devuelve el documento nuevo
+ * (`base` no se modifica).
+ *
+ * Contrato para el llamador (la UI del revisor o el servidor, que aplica conjuntos guardados):
+ * - Todas las sugerencias se calcularon con `calcularSugerencias` contra ESTA misma versión
+ *   de `base` (rangos, anclas, `siguiente` y bids se refieren a ella). Si la base cambió,
+ *   hay que recalcular; mezclar versiones puede ubicar mal o lanzar.
+ * - Los grupos van enteros: el llamador cierra el conjunto con
+ *   `completarGrupo(aceptadas, todas, rechazadas)` (que lanza si un grupo quedó a medias)
+ *   y pasa el resultado. Un grupo incompleto lanza «Grupo incompleto …».
+ * - En cada conflicto (`detectarConflictos`) se acepta como mucho un autor: si el conjunto
+ *   contiene sugerencias en conflicto entre sí, lanza «Sugerencias en conflicto: …».
+ * - Puede lanzar `Error` con un mensaje visible para el revisor en vez de adivinar:
+ *   «No se puede ubicar la inserción …» (ancla o `siguiente` ausente o eliminado, lugar
+ *   inválido según el esquema), «No se puede eliminar el párrafo inicial de un ítem …»,
+ *   «No se puede eliminar la cabecera», «Bloque no encontrado», «Sugerencia fuera de rango
+ *   o solapada», «Inserción sin orden». El llamador debe mostrar el mensaje y no guardar
+ *   el resultado.
+ * Cualquier subconjunto de un solo autor que cumpla lo anterior deja cada bloque insertado
+ * aceptado en el mismo contenedor y del mismo lado de sus vecinos que en la copia, o lanza.
+ */
 export function aplicarSugerencias(base: DocJSON, aceptadas: Sugerencia[]): DocJSON {
   const conflictos = detectarConflictos(aceptadas);
   if (conflictos.length > 0) {
