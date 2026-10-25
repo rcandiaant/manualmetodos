@@ -11,9 +11,18 @@ export function fnv1a(texto: string): string {
   return h.toString(16).padStart(8, '0');
 }
 
+/** Lugar de una inserción (no cambia al insertar otras sugerencias antes). */
+const lugar = (s: Omit<Sugerencia, 'id'>) => ({
+  profundidad: s.profundidad ?? null,
+  primerHijo: s.primerHijo ?? false,
+  siguiente: s.siguiente ?? null,
+});
+
 /**
  * Id por contenido: `${autor}:${bloqueId}:${hash}`. No depende de rangos ni de la
  * posición: insertar otra sugerencia antes no cambia los ids de las demás.
+ * Incluye el lugar de una inserción (`profundidad`, `primerHijo`, `siguiente`): dos
+ * inserciones iguales en contenedores distintos tienen ids distintos e independientes.
  * `ocurrencia` (desde 0) desambigua sugerencias idénticas del mismo autor y bloque.
  * Solo usa caracteres `[A-Za-z0-9:@+_-]` si autor y bloqueId los usan.
  */
@@ -24,6 +33,7 @@ export function idSugerencia(s: Omit<Sugerencia, 'id'>, ocurrencia: number): str
       original: s.original,
       propuesta: s.propuesta,
       grupo: s.grupo ?? null,
+      ...lugar(s),
       ocurrencia,
     }),
   );
@@ -40,6 +50,8 @@ export function asignarIds(sugs: Sugerencia[]): void {
       tipo: s.tipo,
       original: s.original,
       propuesta: s.propuesta,
+      grupo: s.grupo ?? null,
+      ...lugar(s),
     });
     const k = vistas.get(clave) ?? 0;
     vistas.set(clave, k + 1);

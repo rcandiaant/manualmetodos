@@ -1,5 +1,5 @@
 import type { DocJSON } from '../tipos';
-import { SUBSUP_MATEMATICO } from './inline';
+import { MATEMATICA_DE_SIMBOLO, SUBSUP_MATEMATICO } from './inline';
 
 /**
  * Exportador JSON → LaTeX: inverso exacto de `importarLatex` (Tasks 3 y 4).
@@ -33,7 +33,37 @@ const ESCAPE: Record<string, string> = {
   '—': '---',
   '“': '``',
   '”': "''",
+  // Task 4: `"` es activo en babel-spanish; `<<` y `>>` son sus atajos de comillas.
+  '"': '\\textquotedbl{}',
+  '<': '\\textless{}',
+  '>': '\\textgreater{}',
 };
+
+/**
+ * Caracteres del texto del usuario que el exportador sabe escribir (además del
+ * ASCII imprimible): escapes, `°` y los símbolos que van como `$\cmd$`.
+ */
+export const CARACTERES_MAPEADOS: ReadonlySet<string> = new Set([
+  ...Object.keys(ESCAPE),
+  ...Object.keys(MATEMATICA_DE_SIMBOLO),
+  '°',
+]);
+
+/** Cantidad de `\` justo antes de la posición `fin`. */
+function barrasAntes(s: string, fin: number): number {
+  let k = 0;
+  while (fin - k - 1 >= 0 && s[fin - k - 1] === '\\') k++;
+  return k;
+}
+
+/**
+ * Concatena LaTeX. Entre una fórmula `$…$` y otra que empieza justo después va
+ * `{}` (TeX leería `$$` como matemática en display); el importador la descarta.
+ */
+function unir(s: string, pieza: string): string {
+  const cierraMath = s.endsWith('$') && barrasAntes(s, s.length - 1) % 2 === 0;
+  return cierraMath && pieza.startsWith('$') ? `${s}{}${pieza}` : s + pieza;
+}
 
 const tieneMarca = (n: DocJSON, tipo: string) => (n.marks ?? []).some((m) => m.type === tipo);
 const esSubSup = (n: DocJSON) =>
@@ -49,6 +79,8 @@ const esSubSupMath = (n: DocJSON) => esSubSup(n) && SUBSUP_MATEMATICO.test(n.tex
  * Escapa el texto del usuario. `°` → `\degree`, con `{}` si lo sigue una
  * letra o un blanco (o el fin del nodo), para no producir `\degreeC` ni
  * perder el blanco (el importador descarta los espacios tras `\degree`).
+ * `≤ ≥ → × ± µ μ` → `$\leq$`… (Task 4): el importador lee esas fórmulas exactas
+ * como el carácter.
  */
 function escaparTexto(t: string): string {
   let s = '';
@@ -57,7 +89,8 @@ function escaparTexto(t: string): string {
     if (c === '°') {
       const sig = t[i + 1];
       s += sig === undefined || /[\p{L}\s]/u.test(sig) ? '\\degree{}' : '\\degree';
-    } else s += ESCAPE[c] ?? c;
+    } else if (MATEMATICA_DE_SIMBOLO[c]) s = unir(s, `$${MATEMATICA_DE_SIMBOLO[c]}$`);
+    else s += ESCAPE[c] ?? c;
   }
   return s;
 }
@@ -125,10 +158,10 @@ function inline(nodos: DocJSON[], nivel: number, abiertas: string[] = []): strin
         math += subSup(nodos[j]);
         j++;
       }
-      s += `$${math}$`;
+      s = unir(s, `$${math}$`);
       i = j;
     } else {
-      s += inlineAtomo(n, nivel);
+      s = unir(s, inlineAtomo(n, nivel));
       i++;
     }
   }

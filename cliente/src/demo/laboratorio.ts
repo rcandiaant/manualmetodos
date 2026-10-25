@@ -68,7 +68,13 @@ export function montarLaboratorio(contenedor: HTMLElement, ctx: ContextoModo, la
     window.clearTimeout(temporizador);
     recalcular(); // las sugerencias (y sus ids) al día antes de filtrar motivos
     // Si la copia cambió, se descartan solo las decisiones de sugerencias que ya no existen.
-    guardarCopia(estado, lab, editor.getJSON() as DocJSON);
+    try {
+      guardarCopia(estado, lab, editor.getJSON() as DocJSON);
+    } catch (e) {
+      // Error visible; la copia sigue marcada «sin guardar» y no se persiste.
+      cajaError(error, `no se pudo guardar la copia: ${mensajeDe(e)}`);
+      return;
+    }
     // Solo se conservan los motivos de sugerencias vigentes.
     const vigentes = new Set(sugerencias.map((s) => s.id));
     for (const id of Object.keys(motivos)) if (!vigentes.has(id)) delete motivos[id];

@@ -68,7 +68,36 @@ const CARACTER_DE_MACRO: Record<string, string> = {
   textbackslash: '\\',
   textasciitilde: '~',
   textasciicircum: '^',
+  // Task 4: formas del exportador para `"`, `<` y `>` (atajos de babel-spanish).
+  textquotedbl: '"',
+  textless: '<',
+  textgreater: '>',
 };
+
+/**
+ * Task 4: símbolos del texto que el exportador escribe como `$\cmd$` (µ y μ
+ * comparten `$\mu$`).
+ */
+export const MATEMATICA_DE_SIMBOLO: Record<string, string> = {
+  '≤': '\\leq',
+  '≥': '\\geq',
+  '→': '\\rightarrow',
+  '×': '\\times',
+  '±': '\\pm',
+  'µ': '\\mu',
+  'μ': '\\mu',
+};
+
+/**
+ * Inverso: la fórmula exacta `$\cmd$` (sin espacios ni nada más) se lee como el
+ * carácter; `$\mu$` como µ (U+00B5, signo micro). Una fórmula así escrita a mano en
+ * un capítulo también se lee como texto, y el exportador la reescribe byte a byte.
+ */
+const SIMBOLO_DE_MATEMATICA: Record<string, string> = Object.fromEntries(
+  Object.entries(MATEMATICA_DE_SIMBOLO)
+    .filter(([c]) => c !== 'μ')
+    .map(([c, cmd]) => ['$' + cmd + '$', c]),
+);
 
 /** Caracteres literales ↔ marcadores de uso privado (protegidos de `tipografia`). */
 const MARCADOR: Record<string, string> = { '\\': '', '~': '', '^': '' };
@@ -194,7 +223,8 @@ function convertir(nodos: Ast.Node[], ctx: CtxImport): DocJSON[] {
       terminarPalabraDeControl();
     } else if (n.type === 'macro' && CARACTER_DE_MACRO[n.content] && !n.args) {
       // Marcador privado: la tipografía no debe tocar el carácter (`~` → U+00A0).
-      texto += MARCADOR[CARACTER_DE_MACRO[n.content]];
+      const c = CARACTER_DE_MACRO[n.content];
+      texto += MARCADOR[c] ?? c;
       terminarPalabraDeControl();
     } else if (
       n.type === 'macro' &&
@@ -207,6 +237,10 @@ function convertir(nodos: Ast.Node[], ctx: CtxImport): DocJSON[] {
       const tipo = MARCA_DE_MACRO[n.content];
       const g = nodos[++i] as Ast.Group;
       emitir(...convertir(g.content, ctx).map((h) => marcar(h, tipo)));
+    } else if (n.type === 'inlinemath' && SIMBOLO_DE_MATEMATICA[ctx.crudo(n)]) {
+      texto += SIMBOLO_DE_MATEMATICA[ctx.crudo(n)];
+    } else if (n.type === 'group' && n.content.length === 0 && entreFormulas(nodos, i, ctx)) {
+      // Separador `{}` que pone el exportador entre dos fórmulas `$…$` contiguas.
     } else if (n.type === 'inlinemath') {
       const nodosMath = mathInline(n, ctx);
       if (nodosMath) emitir(...nodosMath);
@@ -244,6 +278,23 @@ function convertir(nodos: Ast.Node[], ctx: CtxImport): DocJSON[] {
   }
   volcar();
   return salida;
+}
+
+/**
+ * El nodo `i` está pegado (sin espacios) entre dos fórmulas de la forma `$…$`
+ * (no `\(…\)`: junto a ésas el exportador nunca pone `{}`).
+ */
+function entreFormulas(nodos: Ast.Node[], i: number, ctx: CtxImport): boolean {
+  const [a, g, b] = [nodos[i - 1], nodos[i], nodos[i + 1]];
+  return (
+    a?.type === 'inlinemath' &&
+    b?.type === 'inlinemath' &&
+    ctx.crudo(a).endsWith('$') &&
+    ctx.crudo(b).startsWith('$') &&
+    a.position?.end.offset !== undefined &&
+    a.position.end.offset === g.position?.start.offset &&
+    g.position?.end.offset === b.position?.start.offset
+  );
 }
 
 function especialInline(n: Ast.Node, latex: string, ctx: CtxImport): DocJSON {

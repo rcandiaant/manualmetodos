@@ -168,6 +168,95 @@ describe('exportarLatex — ida y vuelta', () => {
     expect(tex).toContain('NH$_4^+$ y x$_{12}$');
   });
 
+  describe('Task 4: símbolos del texto de usuario', () => {
+    const SIMBOLOS = '≤ ≥ → × ± µ μ ° " < >';
+    const texto0 = (d: DocJSON) => d.content![2].content;
+
+    it('mapea símbolos comunes', () => {
+      const tex = exportarLatex(cab([parrafo({ type: 'text', text: SIMBOLOS })]));
+      expect(tex).toContain(
+        '$\\leq$ $\\geq$ $\\rightarrow$ $\\times$ $\\pm$ $\\mu$ $\\mu$ \\degree{} \\textquotedbl{} \\textless{} \\textgreater{}',
+      );
+      const vuelta = importarLatex(tex);
+      expect(vuelta.avisos).toEqual([]);
+      // `$\mu$` se lee como µ (U+00B5): μ (U+03BC) vuelve como µ, el mismo glifo.
+      expect(texto0(vuelta.doc)).toEqual([{ type: 'text', text: SIMBOLOS.replace('μ', 'µ') }]);
+    });
+
+    it('sin el μ griego la ida y vuelta JSON es identidad', () => {
+      const d = cab([parrafo({ type: 'text', text: 'a≤b, 5±0,1 µm; x→y 2×3 "q" <<c>> 20°C' })]);
+      const vuelta = importarLatex(exportarLatex(d));
+      expect(vuelta.avisos).toEqual([]);
+      expect(vuelta.doc).toEqual(d);
+    });
+
+    it('evita los atajos << y >> de babel-spanish', () => {
+      const tex = exportarLatex(cab([parrafo({ type: 'text', text: '<<x>>' })]));
+      expect(tex).toContain('\\textless{}\\textless{}x\\textgreater{}\\textgreater{}');
+      expect(tex).not.toMatch(/<|>/);
+    });
+
+    it('símbolos contiguos o junto a una fórmula no forman $$', () => {
+      const d = cab([
+        parrafo(
+          { type: 'text', text: '≤≥' },
+          { type: 'matematica', attrs: { latex: 'x' } },
+          { type: 'text', text: '±' },
+          { type: 'text', text: '2', marks: [{ type: 'subindice' }] },
+          { type: 'text', text: '×', marks: [{ type: 'negrita' }] },
+        ),
+      ]);
+      const tex = exportarLatex(d);
+      expect(tex).not.toContain('$$');
+      expect(tex).toContain('$\\leq${}$\\geq${}$x${}$\\pm${}$_2$\\textbf{$\\times$}');
+      const vuelta = importarLatex(tex);
+      expect(vuelta.avisos).toEqual([]);
+      expect(vuelta.doc).toEqual(d);
+    });
+
+    it('símbolos con marcas y en sub/superíndice vuelven iguales', () => {
+      const d = cab([
+        parrafo(
+          { type: 'text', text: 'x' },
+          { type: 'text', text: '±', marks: [{ type: 'superindice' }] },
+          { type: 'text', text: ' a ' },
+          { type: 'text', text: '≤ "y"', marks: [{ type: 'cursiva' }] },
+        ),
+      ]);
+      const vuelta = importarLatex(exportarLatex(d));
+      expect(vuelta.avisos).toEqual([]);
+      expect(vuelta.doc).toEqual(d);
+    });
+
+    it('el importador lee \\textless{}, \\textgreater{} y \\textquotedbl{} como el carácter', () => {
+      const tex = '\\analito{A}\n\n\\metodo{M}\n\nx \\textless{} y \\textgreater{}z \\textquotedbl{}q\\textquotedbl{}.\n';
+      const { doc: d, avisos } = importarLatex(tex);
+      expect(avisos).toEqual([]);
+      expect(texto0(d)).toEqual([{ type: 'text', text: 'x < y >z "q".' }]);
+    });
+
+    it.each(['\\(a\\){}$b$', '$a${}\\(b\\)', '$a${}$b$ y \\(a\\){}\\(b\\)'])(
+      'el {} del autor junto a \\(…\\) se conserva: %j',
+      (c) => {
+        const tex = `\\analito{A}\n\n\\metodo{M}\n\n${c}\n`;
+        const exportado = exportarLatex(importarLatex(tex).doc);
+        expect(compararLatex(tex, exportado).igual).toBe(true);
+      },
+    );
+
+    it('la matemática escrita a mano en un capítulo vuelve byte a byte', () => {
+      const tex =
+        '\\analito{A}\n\n\\metodo{M}\n\n' +
+        'CE $\\leq$ 0,5 dS/m, pH 7,30 $ \\pm $ 0,05, a 25$\\degree$C, pH $\\leq 6,5$ y $(105 \\pm 5)\\degree C$; $\\geq 20\\%$ y $>$ 2.\n';
+      const { doc: d, avisos } = importarLatex(tex);
+      expect(avisos).toEqual([]);
+      const exportado = exportarLatex(d);
+      expect(exportado).toContain(tex.split('\n\n')[2]);
+      expect(compararLatex(tex, exportado).igual).toBe(true);
+      expect(importarLatex(exportado).doc).toEqual(d);
+    });
+  });
+
   describe('I2: `[` al inicio de un \\item o de una fila de tabla', () => {
     const t = (text: string): DocJSON => ({ type: 'text', text });
     const p = (bid: string, text: string): DocJSON => ({ type: 'parrafo', attrs: { bid }, content: [t(text)] });

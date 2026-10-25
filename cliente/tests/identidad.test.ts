@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fnv1a, idSugerencia } from '../src/cambios/identidad';
 import { calcularSugerencias } from '../src/cambios/sugerencias';
-import { doc, parrafo } from './ayudantes-doc';
+import { doc, item, lista, parrafo } from './ayudantes-doc';
 
 const AUTOR = 'labA';
 const BASE = doc(parrafo('p1', 'Uno dos tres cuatro cinco seis.'));
@@ -54,7 +54,39 @@ describe('identidad por contenido', () => {
     }
   });
 
-  it('idSugerencia solo depende de tipo, original, propuesta, grupo y ocurrencia', () => {
+  it('inserciones idénticas en contenedores distintos tienen ids distintos e independientes', () => {
+    // Dentro del ítem (profundidad 2) y tras la lista (profundidad 0): mismo ancla p1, mismo contenido.
+    const base = doc(lista(item(null, parrafo('p1', 'Uno.'))), parrafo('p2', 'Dos.'));
+    const ambas = doc(
+      lista(item(null, parrafo('p1', 'Uno.'), parrafo(null, 'Igual.'))),
+      parrafo(null, 'Igual.'),
+      parrafo('p2', 'Dos.'),
+    );
+    const soloFuera = doc(lista(item(null, parrafo('p1', 'Uno.'))), parrafo(null, 'Igual.'), parrafo('p2', 'Dos.'));
+    const s = calcularSugerencias(base, ambas, AUTOR);
+    expect(s.map((x) => [x.bloqueId, x.profundidad])).toEqual([
+      ['p1', 2],
+      ['p1', 0],
+    ]);
+    expect(s[0].id).not.toBe(s[1].id);
+    // Quitar la de dentro no cambia el id de la de fuera.
+    expect(ids(base, soloFuera)).toEqual([s[1].id]);
+  });
+
+  it('el id depende de profundidad, primerHijo y siguiente', () => {
+    const [s] = calcularSugerencias(
+      BASE,
+      doc(parrafo('p1', 'Uno dos tres cuatro cinco seis.'), parrafo(null, 'Nuevo.')),
+      AUTOR,
+    );
+    const { id, ...resto } = s;
+    expect(idSugerencia(resto, 0)).toBe(id);
+    expect(idSugerencia({ ...resto, profundidad: 1 }, 0)).not.toBe(id);
+    expect(idSugerencia({ ...resto, siguiente: 'x9' }, 0)).not.toBe(id);
+    expect(idSugerencia({ ...resto, primerHijo: true }, 0)).not.toBe(id);
+  });
+
+  it('idSugerencia no depende de los rangos y sí de la ocurrencia', () => {
     const [s] = calcularSugerencias(BASE, doc(parrafo('p1', 'Uno DOS tres cuatro cinco seis.')), AUTOR);
     const { id: _id, ...resto } = s;
     expect(idSugerencia({ ...resto, base: { desde: 9, hasta: 9 }, copia: { desde: 9, hasta: 9 } }, 0)).toBe(s.id);

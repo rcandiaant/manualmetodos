@@ -5,6 +5,7 @@ import { avisosNoCubiertos, tipoMovimiento } from '../cambios/estructura';
 import { ANCLA_INICIO, calcularSugerencias, listarBloques } from '../cambios/sugerencias';
 import { validarDocumento } from '../esquema/esquema';
 import { exportarLatex } from '../latex/exportar';
+import { caracteresNoSoportados, referenciasColgantes } from '../latex/revision';
 import type { DocJSON, Sugerencia } from '../tipos';
 import { LABS, LETRA_LAB, NOMBRE_LAB, type ContextoModo, type Decision, type Lab, type Modo } from './almacen';
 import { claveDecoraciones, decoracionesRevisor } from './decoraciones';
@@ -45,6 +46,12 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
 
   const error = el('div', { class: 'error', role: 'alert' });
   error.hidden = true;
+  /**
+   * Task 4: aviso en la página (no `confirm`) con lo que el .tex no puede representar.
+   * Se oculta al redibujar: si cambian las decisiones, hay que volver a revisar.
+   */
+  const avisoExportar = el('div', { class: 'aviso aviso-exportar', role: 'alert' });
+  avisoExportar.hidden = true;
   const resumen = el('span', { class: 'contador', 'aria-live': 'polite' });
   const areaEditor = el('div', { class: 'editor', 'data-modo': 'revisor' });
   const lista = el('ol', { class: 'tarjetas' });
@@ -215,6 +222,8 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
   }
 
   function redibujar(): void {
+    // «Exportar de todos modos» no puede saltarse la revisión de lo recién aceptado.
+    avisoExportar.hidden = true;
     try {
       const set = decoracionesRevisor(editor.state.doc, sugerencias, {
         conflictos,
@@ -239,7 +248,37 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
       `${conflictos.length} conflicto${conflictos.length === 1 ? '' : 's'}`;
   }
 
-  function exportar(): void {
+  function mostrarAvisoExportar(
+    caracteres: ReturnType<typeof caracteresNoSoportados>,
+    colgantes: string[],
+  ): void {
+    const lugar = (b: string | null) => (b === null ? 'en el título' : `en el bloque ${b}`);
+    const punto = (c: string) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
+    avisoExportar.replaceChildren(
+      el('strong', {}, 'Antes de exportar: el .tex final puede no compilar o perder información.'),
+      ...(caracteres.length > 0
+        ? [
+            el('p', {}, 'Caracteres sin forma LaTeX conocida (pdflatex puede fallar o no mostrarlos):'),
+            el('ul', {}, ...caracteres.map((c) => el('li', {}, `«${c.caracter}» (${punto(c.caracter)}) ${lugar(c.bloqueId)}`))),
+          ]
+        : []),
+      ...(colgantes.length > 0
+        ? [
+            el('p', {}, 'Referencias a etiquetas que ningún ítem declara (saldrán como «??»):'),
+            el('ul', {}, ...colgantes.map((e) => el('li', {}, e))),
+          ]
+        : []),
+      el(
+        'div',
+        { class: 'acciones' },
+        boton('Exportar de todos modos', () => exportar(true), 'primario'),
+        boton('Cancelar', () => (avisoExportar.hidden = true), 'secundario'),
+      ),
+    );
+    avisoExportar.hidden = false;
+  }
+
+  function exportar(deTodosModos = false): void {
     try {
       // Un grupo se decide entero; completarGrupo lanza error si quedó decidido a medias.
       const aceptadas = completarGrupo(
@@ -250,6 +289,16 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
       const final = aplicarSugerencias(base, aceptadas);
       const v = validarDocumento(final);
       if (!v.ok) throw new Error(`el documento resultante no es válido: ${v.error}`);
+      if (!deTodosModos) {
+        const caracteres = caracteresNoSoportados(final);
+        const colgantes = referenciasColgantes(final);
+        if (caracteres.length > 0 || colgantes.length > 0) {
+          mostrarAvisoExportar(caracteres, colgantes);
+          cajaError(error, null);
+          return;
+        }
+      }
+      avisoExportar.hidden = true;
       const tex = exportarLatex(final);
       const nombre = (estado.archivo ?? 'capitulo.tex').replace(/\.tex$/i, '') + '-revisado.tex';
       const url = URL.createObjectURL(new Blob([tex], { type: 'text/x-tex;charset=utf-8' }));
@@ -295,11 +344,12 @@ export function montarRevisor(contenedor: HTMLElement, ctx: ContextoModo): Modo 
           'div',
           { class: 'barra-superior' },
           leyenda,
-          el('div', { class: 'acciones' }, boton('Exportar .tex final', exportar, 'primario')),
+          el('div', { class: 'acciones' }, boton('Exportar .tex final', () => exportar(), 'primario')),
         ),
         el('p', { class: 'nota' }, 'Solo se aplican las sugerencias aceptadas; las que no tienen decisión se descartan.'),
         avisoDescartadas,
         avisosEstructura,
+        avisoExportar,
         error,
         areaEditor,
       ),
