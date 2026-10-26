@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build": "vite build",
     "test": "vitest run",
     "verificar": "tsx scripts/verificar-capitulos.ts",
     "escala": "tsx scripts/escala.ts",
