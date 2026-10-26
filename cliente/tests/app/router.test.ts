@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { definirRutas, type Router, type Vista } from '../../src/app/router';
+import { definirRutas, vistaDiferida, type Router, type Vista } from '../../src/app/router';
 
 /** Router por hash: monta la vista de la ruta y espera `desmontar` antes de cambiar. */
 
@@ -167,5 +167,89 @@ describe('router', () => {
     // Sin consulta, la vista recibe una vacía.
     await router.navegar('#/revisar/4');
     expect(vistos.at(-1)).toBe('4 ');
+  });
+
+  it('si desmontar se cuelga (p. ej. un guardado sin respuesta), la vista nueva se monta igual (I2)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const raiz = document.createElement('div');
+      const errores = vi.spyOn(console, 'error').mockImplementation(() => {});
+      router = definirRutas(
+        {
+          '#/capitulos': () => ({ montar: (r) => void (r.textContent = 'capitulos'), desmontar: () => new Promise<void>(() => {}) }),
+          '#/capitulos/:id': () => ({ montar: (r) => void (r.textContent = 'capitulo'), desmontar() {} }),
+        },
+        raiz,
+      );
+      await router.navegar('#/capitulos');
+      let llego = false;
+      void router.navegar('#/capitulos/3').then(() => (llego = true));
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(llego).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(llego).toBe(true);
+      expect(raiz.textContent).toBe('capitulo');
+      errores.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('la redireccion inicial no pisa una navegacion hecha justo despues de definir las rutas', async () => {
+    history.replaceState(null, '', '#/no-existe');
+    const raiz = document.createElement('div');
+    const montadas: string[] = [];
+    const vista = (nombre: string) => (): Vista => ({ montar: () => void montadas.push(nombre), desmontar() {} });
+    router = definirRutas({ '#/capitulos': vista('capitulos'), '#/admin/usuarios': vista('usuarios') }, raiz);
+    await router.navegar('#/admin/usuarios');
+    await router.listo;
+    expect(montadas.at(-1)).toBe('usuarios');
+    expect(location.hash).toBe('#/admin/usuarios');
+  });
+});
+
+describe('vistaDiferida (carga por ruta)', () => {
+  it('muestra «Cargando…», monta la vista al llegar el modulo y desmontar espera a la interna', async () => {
+    let entregar!: (v: Vista) => void;
+    const eventos: string[] = [];
+    const interna: Vista = {
+      montar: (r) => {
+        eventos.push('montar');
+        r.textContent = 'interna';
+      },
+      desmontar: async () => void eventos.push('desmontar'),
+    };
+    const v = vistaDiferida(() => new Promise<Vista>((r) => (entregar = r)));
+    const raiz = document.createElement('div');
+    v.montar(raiz);
+    expect(raiz.textContent).toBe('Cargando…');
+    entregar(interna);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(raiz.textContent).toBe('interna');
+    await v.desmontar();
+    expect(eventos).toEqual(['montar', 'desmontar']);
+  });
+
+  it('si se sale antes de que llegue el modulo, la vista interna no se monta', async () => {
+    let entregar!: (v: Vista) => void;
+    const montar = vi.fn();
+    const v = vistaDiferida(() => new Promise<Vista>((r) => (entregar = r)));
+    const raiz = document.createElement('div');
+    v.montar(raiz);
+    const fin = v.desmontar();
+    entregar({ montar, desmontar() {} });
+    await fin;
+    expect(montar).not.toHaveBeenCalled();
+  });
+
+  it('si la carga falla, muestra un aviso role=alert', async () => {
+    const errores = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const v = vistaDiferida(() => Promise.reject(new Error('sin red')));
+    const raiz = document.createElement('div');
+    v.montar(raiz);
+    await vi.waitFor(() => expect(raiz.querySelector('[role="alert"]')?.textContent).toContain('No se pudo abrir esta página'));
+    await v.desmontar();
+    errores.mockRestore();
   });
 });

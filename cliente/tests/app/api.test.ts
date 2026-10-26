@@ -240,3 +240,81 @@ describe('api', () => {
     expect(e).toMatchObject({ estado: 400, codigo: 'entrada_invalida', campos: { correo: 'Obligatorio.' } });
   });
 });
+
+describe('api: tiempo limite (I2)', () => {
+  const colgado = () => {
+    const señales: (AbortSignal | undefined)[] = [];
+    const fn = vi.fn((_e: RequestInfo | URL, init: RequestInit = {}) => {
+      señales.push(init.signal ?? undefined);
+      return new Promise<Response>(() => {}); // nunca responde (ni atiende la señal)
+    });
+    return { fetch: fn as unknown as typeof fetch, señales };
+  };
+
+  it('una peticion colgada termina en sin_conexion a los 30 s y aborta el fetch', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch, señales } = colgado();
+      const api = crearApi({ fetch, alSinSesion: () => {} });
+      let fin: unknown = 'pendiente';
+      void api.get('/capitulos').then(
+        (r) => (fin = r),
+        (e: unknown) => (fin = e),
+      );
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(fin).toBe('pendiente');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fin).toBeInstanceOf(ErrorApi);
+      expect(fin).toMatchObject({ estado: 0, codigo: 'sin_conexion' });
+      expect(señales[0]?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('el PUT de la copia tiene 90 s', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch } = colgado();
+      const api = crearApi({ fetch, alSinSesion: () => {} });
+      api.fijarCsrf('tok');
+      let fin: unknown = 'pendiente';
+      void api.put('/capitulos/3/copia', { docJson: {} }).catch((e: unknown) => (fin = e));
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(fin).toBe('pendiente');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fin).toMatchObject({ estado: 0, codigo: 'sin_conexion' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('un cuerpo grande tambien tiene 90 s', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch } = colgado();
+      const api = crearApi({ fetch, alSinSesion: () => {} });
+      api.fijarCsrf('tok');
+      let fin: unknown = 'pendiente';
+      void api.post('/admin/capitulos', { tex: 'x'.repeat(200_000) }).catch((e: unknown) => (fin = e));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fin).toBe('pendiente');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fin).toMatchObject({ codigo: 'sin_conexion' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('una respuesta a tiempo no deja temporizadores vivos', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch } = fetchSimulado(json(200, { ok: 1 }));
+      const api = crearApi({ fetch, alSinSesion: () => {} });
+      expect(await api.get('/capitulos')).toEqual({ ok: 1 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

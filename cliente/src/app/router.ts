@@ -5,6 +5,9 @@
  * (p. ej. el último envío del autoguardado). Las navegaciones se encadenan: nunca
  * hay dos transiciones a la vez. Una ruta desconocida va a `#/capitulos`. Si la vista
  * falla al crearse o montarse, se muestra un aviso `role="alert"` y el router sigue vivo.
+ * Si `desmontar` no termina en `DESMONTAR_MAX_MS` (p. ej. un guardado que no responde), se
+ * sigue igual con la vista nueva: lo que esa vista estaba guardando sigue en curso por su
+ * cuenta (el autoguardado ya escribió su borrador local), pero la navegación no se cuelga.
  */
 
 export interface Vista {
@@ -29,6 +32,16 @@ export interface Router {
 }
 
 export const RUTA_INICIO = '#/capitulos';
+
+/** Espera máxima de `desmontar` antes de montar la vista siguiente. */
+export const DESMONTAR_MAX_MS = 10_000;
+
+/** Espera `p`, pero como mucho `ms`; true si terminó a tiempo. */
+function conTope(p: void | Promise<void>, ms: number): Promise<boolean> {
+  let id: ReturnType<typeof setTimeout> | undefined;
+  const tope = new Promise<boolean>((r) => (id = setTimeout(() => r(false), ms)));
+  return Promise.race([Promise.resolve(p).then(() => true), tope]).finally(() => clearTimeout(id));
+}
 
 interface Patron {
   partes: string[];
@@ -99,7 +112,8 @@ export function definirRutas(
     if (!destino) {
       hash = RUTA_INICIO;
       destino = casar(patrones, hash);
-      if (location.hash !== hash) history.replaceState(null, '', hash);
+      // Solo si nadie navegó a otra parte mientras tanto (p. ej. justo tras definir las rutas).
+      if (location.hash !== hash && normalizar(location.hash) === normalizar(hashPedido)) history.replaceState(null, '', hash);
       if (!destino) return;
     }
     if (actual && hash === hashActual) return;
@@ -108,7 +122,9 @@ export function definirRutas(
       actual = null;
       hashActual = null;
       try {
-        await saliente.desmontar();
+        if (!(await conTope(saliente.desmontar(), DESMONTAR_MAX_MS))) {
+          console.error('La vista anterior no terminó de desmontarse a tiempo: se sigue con la nueva.');
+        }
       } catch (e) {
         console.error('Error al desmontar la vista', e);
       }
@@ -161,6 +177,47 @@ export function definirRutas(
   routerActual = router;
   encolar(location.hash);
   return router;
+}
+
+/**
+ * Vista que se carga por ruta (`import()` dinámico) para no meter en el bundle principal
+ * las vistas del revisor y de administración. Mientras llega el módulo muestra «Cargando…»;
+ * si se sale antes, la vista interna no se monta; `desmontar` espera a la interna.
+ */
+export function vistaDiferida(cargar: () => Promise<Vista>): Vista {
+  let vigente = true;
+  let interna: Vista | null = null;
+  let carga: Promise<void> = Promise.resolve();
+  return {
+    montar(raiz) {
+      const espera = document.createElement('p');
+      espera.className = 'cargando';
+      espera.textContent = 'Cargando…';
+      raiz.replaceChildren(espera);
+      carga = cargar().then(
+        (v) => {
+          if (!vigente) return;
+          raiz.replaceChildren();
+          interna = v;
+          try {
+            v.montar(raiz);
+          } catch (e) {
+            console.error('Error al montar la vista', e);
+            raiz.replaceChildren(avisoError(e));
+          }
+        },
+        (e: unknown) => {
+          console.error('Error al cargar la vista', e);
+          if (vigente) raiz.replaceChildren(avisoError(e));
+        },
+      );
+    },
+    async desmontar() {
+      vigente = false;
+      await carga;
+      await interna?.desmontar();
+    },
+  };
 }
 
 /** Navega con el router definido por `definirRutas`. */

@@ -149,6 +149,27 @@ describe('sesion', () => {
     await vi.waitFor(() => expect(t.navegar).toHaveBeenCalledWith('#/capitulo/3'));
   });
 
+  it('la ruta pendiente de una sesion vencida no pasa a otra persona que entra en el mismo equipo', async () => {
+    const { fetch } = fetchSimulado(json(200, { usuario: USUARIO, csrf: 't' }));
+    const api = crearApi({ fetch, alSinSesion: () => {} });
+    await entrar(api, 'a@b.cl', 'x');
+    history.replaceState(null, '', '#/capitulo/3');
+    manejarSinSesion(vi.fn())();
+    const otra: Usuario = { id: 13, nombre: 'Berta', laboratorio: 'Lab Sur', roles: ['laboratorio'] };
+    const t = montarLogin([json(200, { usuario: otra, csrf: 'nuevo' })]);
+    t.enviar('berta@lab.cl', 'secreta');
+    await vi.waitFor(() => expect(t.navegar).toHaveBeenCalledWith('#/capitulos'));
+    expect(t.navegar).not.toHaveBeenCalledWith('#/capitulo/3');
+  });
+
+  it('sin sesion previa (enlace directo), la ruta pedida vale para quien entre', async () => {
+    history.replaceState(null, '', '#/capitulo/5');
+    manejarSinSesion(vi.fn())();
+    const t = montarLogin([json(200, { usuario: USUARIO, csrf: 'nuevo' })]);
+    t.enviar('ana@lab.cl', 'secreta');
+    await vi.waitFor(() => expect(t.navegar).toHaveBeenCalledWith('#/capitulo/5'));
+  });
+
   it('claveAutor y tieneRol', () => {
     expect(claveAutor(USUARIO)).toBe('u12');
     expect(tieneRol(USUARIO, 'laboratorio')).toBe(true);

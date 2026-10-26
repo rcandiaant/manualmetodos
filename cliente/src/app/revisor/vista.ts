@@ -63,6 +63,8 @@ export function vistaRevisor(
   api: Api,
   capituloId: number,
   consulta: URLSearchParams = new URLSearchParams(),
+  /** Revisor de la sesión (clave del borrador local de la versión final). */
+  usuarioId?: number,
 ): Vista & { listo: Promise<void> } {
   let vigente = true;
   let listo: Promise<void> = Promise.resolve();
@@ -317,6 +319,7 @@ export function vistaRevisor(
               etapa: cons.etapa,
               sugerencias: aportes.sugerencias,
               nombreArchivo: nombreTex(cap?.slug, cap?.titulo, capituloId),
+              ...(usuarioId !== undefined ? { usuarioId } : {}),
             });
             seccionFinal.hidden = false;
             await final.listo;

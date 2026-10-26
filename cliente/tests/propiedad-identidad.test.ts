@@ -79,7 +79,7 @@ describe('propiedad: aplicar todas las sugerencias reproduce la copia (M5)', () 
     }
     expect(casos).toBe(300);
     expect(conMovidos).toBeGreaterThan(50); // las mutaciones de estructura se ejercitan
-  });
+  }, 20000); // pesada: con la suite en paralelo puede superar los 5 s por omisión
 });
 
 /**

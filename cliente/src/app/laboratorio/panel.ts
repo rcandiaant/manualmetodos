@@ -508,7 +508,7 @@ export function cajaBorradoresSinEnviar(
   versionId: number,
 ): HTMLElement | null {
   const claveM = claveMotivos(usuarioId, capituloId, versionId);
-  const claveC = claveComentarios(usuarioId, capituloId);
+  const claveC = claveComentarios(usuarioId, capituloId, versionId);
   const motivos = leerJson<Record<string, Partial<Huerfano>>>(almacen, claveM) ?? {};
   const coment = leerJson<{ nuevo?: { cita?: unknown; texto?: unknown }; ediciones?: Record<string, unknown> }>(almacen, claveC) ?? {};
   const partes: string[] = [];

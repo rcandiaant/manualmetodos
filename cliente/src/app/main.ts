@@ -1,16 +1,15 @@
 /**
  * Arranque de la aplicación: recupera la sesión (`GET /sesion`) y define las rutas.
- * Las vistas de capítulo, revisión y administración llegan en las tareas siguientes.
+ * Las vistas del revisor y de administración se cargan por ruta (`import()`), para que el
+ * laboratorio no descargue el importador LaTeX ni el panel de decisiones.
  */
 import 'katex/dist/katex.min.css';
 import '../editor/estilos.css';
 import './app.css';
 import { crearApi } from './api';
-import { rutasAdmin } from './admin/rutas';
 import { vistaInicio } from './inicio';
-import { vistaRevisor } from './revisor/vista';
 import { vistaCapitulo } from './laboratorio/vista';
-import { definirRutas, navegar, RUTA_INICIO, type Vista } from './router';
+import { definirRutas, navegar, RUTA_INICIO, vistaDiferida, type FabricaVista, type Vista } from './router';
 import { iniciar, conCompuerta, manejarSinSesion, RUTA_LOGIN, salir, usuarioActual, vistaLogin } from './sesion';
 import type { Usuario } from './tipos-api';
 
@@ -28,6 +27,22 @@ function protegida(fabrica: (u: Usuario) => Vista): () => Vista {
     }
     return fabrica(u);
   };
+}
+
+/** Rutas de administración (las define `admin/rutas.ts`, que se carga al entrar en una de ellas). */
+const RUTAS_ADMIN = ['#/admin', '#/admin/capitulos', '#/admin/usuarios', '#/admin/consulta'] as const;
+
+function rutasAdminDiferidas(): Record<string, FabricaVista> {
+  const tabla: Record<string, FabricaVista> = {};
+  for (const ruta of RUTAS_ADMIN) {
+    tabla[ruta] = (p, q) =>
+      vistaDiferida(async () => {
+        const fabrica = (await import('./admin/rutas')).rutasAdmin(api, protegida)[ruta];
+        if (!fabrica) throw new Error(`ruta de administración desconocida: ${ruta}`);
+        return fabrica(p, q);
+      });
+  }
+  return tabla;
 }
 
 async function arrancar(): Promise<void> {
@@ -50,9 +65,12 @@ async function arrancar(): Promise<void> {
           },
         }),
       ),
-      ...rutasAdmin(api, protegida),
+      ...rutasAdminDiferidas(),
       [RUTA_LOGIN]: () => vistaLogin(api, { navegar }),
-      '#/revisar/:id': (p, q) => protegida(() => vistaRevisor(api, Number(p.id), q))(),
+      '#/revisar/:id': (p, q) =>
+        protegida((u) =>
+          vistaDiferida(async () => (await import('./revisor/vista')).vistaRevisor(api, Number(p.id), q, u.id)),
+        )(),
       '#/capitulo/:id': (p) => protegida((u) => vistaCapitulo(api, u, p.id))(),
     },
     raiz,

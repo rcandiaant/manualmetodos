@@ -31,8 +31,10 @@ Si mueve, une o separa bloques (por ejemplo, borra el inicio de un ítem y lo pe
 - Si la sesión venció (2 horas sin actividad), verá "Sesión vencida: vuelva a entrar". Entre de nuevo: el borrador se guarda solo.
 - Si al abrir un capítulo hay un borrador que no alcanzó a guardarse, la plataforma le ofrece **recuperarlo** o **descartarlo**.
 - Si la consulta cierra con la página abierta, el capítulo pasa a solo lectura y se le ofrece copiar el texto que no alcanzó a guardarse.
+- **No abra el mismo capítulo en dos pestañas o ventanas.** Si lo hace, solo una puede editar: la otra muestra "Este capítulo está abierto en otra pestaña…" y queda en solo lectura. Cuando cierre la primera, la segunda pasa a editar sola. También puede pulsar **Tomar el control**: la otra pestaña queda en solo lectura y le ofrece copiar lo que no alcanzó a guardar.
+- Si la copia cambió en el servidor desde otra pestaña, ventana o computador, la página no reemplaza ese trabajo: pasa a solo lectura y le ofrece copiar sus últimos cambios. Recárguela para seguir.
 
-El borrador vive solo en el navegador donde trabajó. Termine de guardar antes de cambiarse de computador.
+El borrador vive solo en el navegador donde trabajó. Termine de guardar antes de cambiarse de computador. Si al pulsar **Salir** quedan cambios sin guardar en el navegador, la plataforma se lo avisa antes de cerrar la sesión.
 
 ### Motivos
 
@@ -75,7 +77,7 @@ Los filtros (un laboratorio, solo conflictos, solo pendientes, solo cambios o so
 
 1. **Componer versión final** aplica sobre el texto original solo las sugerencias aceptadas y abre un editor con el resultado.
 2. Ahí puede corregir o redactar directamente, por ejemplo en los aportes marcados como modificados.
-3. **Guardar versión final** la guarda en el servidor. Puede guardar varias veces; se conservan todas las versiones. Mientras edita, la plataforma guarda un borrador en el navegador y se lo ofrece si sale sin guardar.
+3. **Guardar versión final** la guarda en el servidor. Puede guardar varias veces; se conservan todas las versiones. Mientras edita, la plataforma guarda un borrador en el navegador y se lo ofrece si sale sin guardar. Si hay un borrador sin recuperar, **Componer versión final** le pregunta antes de descartarlo.
 4. **Exportar .tex** descarga el capítulo en LaTeX. Si el texto tiene caracteres que LaTeX no sabe escribir o referencias sin destino, la plataforma lo avisa antes de exportar.
 
 ---

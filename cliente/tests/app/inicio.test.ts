@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { crearApi } from '../../src/app/api';
 import { formatearFecha, vistaInicio } from '../../src/app/inicio';
 import type { CapituloLista, Consulta, Usuario } from '../../src/app/tipos-api';
@@ -24,7 +24,7 @@ const usuario = (roles: Usuario['roles']): Usuario => ({
   roles,
 });
 
-async function montar(u: Usuario, c: Consulta, caps: CapituloLista[]) {
+async function montar(u: Usuario, c: Consulta, caps: CapituloLista[], salir: () => Promise<void> = async () => {}) {
   // GET /consulta y GET /capitulos se piden en paralelo: se responde por ruta.
   const fetchRuta = (async (entrada: RequestInfo | URL) => {
     const url = String(entrada);
@@ -34,7 +34,7 @@ async function montar(u: Usuario, c: Consulta, caps: CapituloLista[]) {
   }) as unknown as typeof fetch;
   const api = crearApi({ fetch: fetchRuta, alSinSesion: () => {} });
   const raiz = document.createElement('div');
-  const vista = vistaInicio(api, u, { salir: async () => {} });
+  const vista = vistaInicio(api, u, { salir, almacen: localStorage });
   vista.montar(raiz);
   await vista.listo;
   return raiz;
@@ -119,5 +119,46 @@ describe('inicio', () => {
     const rara = await montar(usuario(['laboratorio']), consulta({ etapa: 'otra' as never }), CAPS);
     expect(rara.querySelector('.banner-etapa')!.textContent).toMatch(/No se pudo determinar la etapa/);
     expect(rara.querySelectorAll('li.capitulo')).toHaveLength(2);
+  });
+
+  it('fuera de la consulta el enlace del laboratorio dice «Ver capítulo»', async () => {
+    const abierta = await montar(usuario(['laboratorio']), consulta(), CAPS);
+    expect(abierta.querySelector('a[href="#/capitulo/3"]')?.textContent).toBe('Abrir en el editor');
+    for (const etapa of ['preparacion', 'edicion_final'] as const) {
+      const raiz = await montar(usuario(['laboratorio']), consulta({ etapa }), CAPS);
+      expect(raiz.querySelector('a[href="#/capitulo/3"]')?.textContent).toBe('Ver capítulo');
+    }
+  });
+});
+
+describe('salir con borradores sin enviar', () => {
+  afterEach(() => localStorage.clear());
+  const botonTexto = (raiz: HTMLElement, t: string) =>
+    [...raiz.querySelectorAll('button')].find((b) => b.textContent === t) as HTMLButtonElement | undefined;
+
+  it('avisa en la pagina si quedan borradores propios en este navegador y sale solo si se confirma', async () => {
+    localStorage.setItem('mm:borrador:12:3:7', JSON.stringify({ docJson: { type: 'doc' } }));
+    const salir = vi.fn(async () => {});
+    const raiz = await montar(usuario(['laboratorio']), consulta(), CAPS, salir);
+    botonTexto(raiz, 'Salir')!.click();
+    expect(salir).not.toHaveBeenCalled();
+    const aviso = raiz.querySelector('.aviso-salir') as HTMLElement;
+    expect(aviso.hidden).toBe(false);
+    expect(aviso.textContent).toContain('cambios sin guardar en este navegador');
+    botonTexto(aviso, 'Cancelar')!.click();
+    expect(aviso.hidden).toBe(true);
+    expect(salir).not.toHaveBeenCalled();
+    botonTexto(raiz, 'Salir')!.click();
+    botonTexto(aviso, 'Salir de todos modos')!.click();
+    expect(salir).toHaveBeenCalledTimes(1);
+  });
+
+  it('los borradores de otra persona o vacios no detienen la salida', async () => {
+    localStorage.setItem('mm:borrador:13:3:7', JSON.stringify({ docJson: { type: 'doc' } }));
+    localStorage.setItem('mm:motivos:12:3:7', '{}');
+    const salir = vi.fn(async () => {});
+    const raiz = await montar(usuario(['laboratorio']), consulta(), CAPS, salir);
+    botonTexto(raiz, 'Salir')!.click();
+    expect(salir).toHaveBeenCalledTimes(1);
   });
 });

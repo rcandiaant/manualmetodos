@@ -11,6 +11,10 @@
  *   `etag`, que devuelve `{noModificado: true}` (un 304 sin `etag` pedido es un error).
  * - Un fallo de red (fetch rechazado) lanza `ErrorApi` con `estado: 0` y
  *   `codigo: 'sin_conexion'` (código propio del cliente, no viene del servidor).
+ * - Tiempo límite (revisión final I2): cada petición, incluida la lectura de la respuesta y el
+ *   reintento por CSRF, tiene 30 s; `PUT …/copia`, `PUT …/final` y los cuerpos de más de
+ *   100 000 caracteres tienen 90 s. Al vencer se aborta el `fetch` y se lanza el mismo
+ *   `sin_conexion` (así el autoguardado programa su reintento y lo dice).
  */
 
 export class ErrorApi extends Error {
@@ -59,6 +63,48 @@ type Metodo = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 /** Código del cliente para un fallo de red (el servidor no respondió). */
 export const SIN_CONEXION = 'sin_conexion';
 
+/** Tiempo límite de una petición normal y de una grande (copia, final o cuerpo de más de 100 000 caracteres). */
+export const PLAZO_MS = 30_000;
+export const PLAZO_LARGO_MS = 90_000;
+const CUERPO_GRANDE = 100_000;
+
+function plazoPara(metodo: Metodo, ruta: string, texto: string | undefined): number {
+  if (metodo === 'PUT' && /^\/capitulos\/[^/]+\/(copia|final)$/.test(ruta)) return PLAZO_LARGO_MS;
+  return texto !== undefined && texto.length > CUERPO_GRANDE ? PLAZO_LARGO_MS : PLAZO_MS;
+}
+
+const sinConexion = (vencido: boolean) =>
+  new ErrorApi(
+    0,
+    SIN_CONEXION,
+    vencido
+      ? 'Sin conexión con el servidor: no respondió a tiempo. Revise su conexión a Internet.'
+      : 'Sin conexión con el servidor. Revise su conexión a Internet.',
+  );
+
+interface Plazo {
+  signal: AbortSignal;
+  /** Se rechaza con `sin_conexion` al vencer (y aborta el fetch). */
+  vencido: Promise<never>;
+  limpiar(): void;
+}
+
+function crearPlazo(ms: number): Plazo {
+  const ctrl = new AbortController();
+  let id: ReturnType<typeof setTimeout> | undefined;
+  const vencido = new Promise<never>((_, rechazar) => {
+    id = setTimeout(() => {
+      ctrl.abort();
+      rechazar(sinConexion(true));
+    }, ms);
+  });
+  vencido.catch(() => {}); // sin rechazo no atendido si nadie lo espera ya
+  return { signal: ctrl.signal, vencido, limpiar: () => clearTimeout(id) };
+}
+
+/** Espera `p` o el vencimiento del plazo, lo que ocurra primero. */
+const aTiempo = <T>(p: Promise<T>, plazo: Plazo): Promise<T> => Promise.race([p, plazo.vencido]);
+
 /** `POST /sesion` (login) no lleva `X-CSRF-Token` ni se reintenta por CSRF (§1.2). */
 const esLogin = (metodo: Metodo, ruta: string): boolean => metodo === 'POST' && ruta === '/sesion';
 
@@ -76,10 +122,10 @@ function conEspera(error: ErrorApi, r: Response): ErrorApi {
 }
 
 /** Arma el `ErrorApi` de una respuesta fallida; si el cuerpo no es el JSON del contrato, `error_interno`. */
-async function errorDeRespuesta(r: Response): Promise<ErrorApi> {
+async function errorDeRespuesta(r: Response, plazo?: Plazo): Promise<ErrorApi> {
   let datos: unknown = null;
   try {
-    datos = await r.json();
+    datos = plazo ? await aTiempo(r.json(), plazo) : await r.json();
   } catch {
     // cuerpo vacío o no JSON (p. ej. un 502 HTML de un proxy)
   }
@@ -100,45 +146,58 @@ export function crearApi(opciones: OpcionesApi): Api {
   const hacerFetch: typeof fetch = opciones.fetch ?? ((entrada, init) => fetch(entrada, init));
   let csrf: string | null = null;
 
-  async function enviar(metodo: Metodo, ruta: string, cuerpo: unknown, etag?: string): Promise<Response> {
+  async function enviar(metodo: Metodo, ruta: string, texto: string | undefined, plazo: Plazo, etag?: string): Promise<Response> {
     const cabeceras: Record<string, string> = { Accept: 'application/json' };
-    const init: RequestInit = { method: metodo, credentials: 'same-origin', headers: cabeceras };
-    if (cuerpo !== SIN_CUERPO) {
+    const init: RequestInit = { method: metodo, credentials: 'same-origin', headers: cabeceras, signal: plazo.signal };
+    if (texto !== undefined) {
       cabeceras['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(cuerpo ?? {});
+      init.body = texto;
     }
     if (metodo !== 'GET' && csrf && !esLogin(metodo, ruta)) cabeceras['X-CSRF-Token'] = csrf;
     if (etag) cabeceras['If-None-Match'] = etag;
     try {
-      return await hacerFetch(`/api${ruta}`, init);
+      return await aTiempo(hacerFetch(`/api${ruta}`, init), plazo);
     } catch {
-      throw new ErrorApi(0, SIN_CONEXION, 'Sin conexión con el servidor. Revise su conexión a Internet.');
+      throw sinConexion(plazo.signal.aborted);
     }
   }
 
   /** Recarga el token con `GET /sesion`. Devuelve false si no se pudo. */
-  async function recargarCsrf(): Promise<boolean> {
-    const r = await enviar('GET', '/sesion', SIN_CUERPO);
+  async function recargarCsrf(plazo: Plazo): Promise<boolean> {
+    const r = await enviar('GET', '/sesion', undefined, plazo);
     if (!r.ok) {
-      const e = await errorDeRespuesta(r);
+      const e = await errorDeRespuesta(r, plazo);
       if (e.codigo === 'sin_sesion') {
         opciones.alSinSesion();
         throw e;
       }
       return false;
     }
-    const datos = (await r.json().catch(() => null)) as { csrf?: unknown } | null;
+    const datos = (await aTiempo(r.json(), plazo).catch((e: unknown) => {
+      if (e instanceof ErrorApi) throw e; // venció el plazo
+      return null;
+    })) as { csrf?: unknown } | null;
     if (typeof datos?.csrf !== 'string') return false;
     csrf = datos.csrf;
     return true;
   }
 
   async function pedir<T>(metodo: Metodo, ruta: string, cuerpo: unknown, etag?: string): Promise<T> {
-    let r = await enviar(metodo, ruta, cuerpo, etag);
+    const texto = cuerpo === SIN_CUERPO ? undefined : JSON.stringify(cuerpo ?? {});
+    const plazo = crearPlazo(plazoPara(metodo, ruta, texto));
+    try {
+      return await pedirConPlazo<T>(metodo, ruta, texto, plazo, etag);
+    } finally {
+      plazo.limpiar();
+    }
+  }
+
+  async function pedirConPlazo<T>(metodo: Metodo, ruta: string, texto: string | undefined, plazo: Plazo, etag?: string): Promise<T> {
+    let r = await enviar(metodo, ruta, texto, plazo, etag);
     if (r.status === 403 && metodo !== 'GET' && !esLogin(metodo, ruta)) {
-      const e = await errorDeRespuesta(r.clone());
-      if (e.codigo === 'csrf_invalido' && (await recargarCsrf())) {
-        r = await enviar(metodo, ruta, cuerpo, etag);
+      const e = await errorDeRespuesta(r.clone(), plazo);
+      if (e.codigo === 'csrf_invalido' && (await recargarCsrf(plazo))) {
+        r = await enviar(metodo, ruta, texto, plazo, etag);
       }
     }
     if (r.status === 304) {
@@ -146,15 +205,20 @@ export function crearApi(opciones: OpcionesApi): Api {
       throw new ErrorApi(304, 'error_interno', 'El servidor respondió 304 sin que se pidiera una validación.');
     }
     if (!r.ok) {
-      const e = await errorDeRespuesta(r);
+      const e = await errorDeRespuesta(r, plazo);
       if (e.estado === 401 && e.codigo === 'sin_sesion') opciones.alSinSesion();
       throw e;
     }
     if (r.status === 204) return undefined as T;
-    const texto = await r.text();
-    if (!texto) return undefined as T;
+    let respuesta: string;
     try {
-      return JSON.parse(texto) as T;
+      respuesta = await aTiempo(r.text(), plazo);
+    } catch (e) {
+      throw e instanceof ErrorApi ? e : sinConexion(false);
+    }
+    if (!respuesta) return undefined as T;
+    try {
+      return JSON.parse(respuesta) as T;
     } catch {
       throw new ErrorApi(r.status, 'error_interno', 'La respuesta del servidor no es JSON válido.');
     }

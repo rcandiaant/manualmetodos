@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ErrorApi, SIN_CONEXION, type Api } from '../../../src/app/api';
-import { claveBorrador, crearAutoguardado, leerBorrador, type InfoGuardado } from '../../../src/app/laboratorio/autoguardado';
+import { crearApi, ErrorApi, SIN_CONEXION, type Api } from '../../../src/app/api';
+import {
+  claveBorrador,
+  claveConfirmado,
+  COPIA_CAMBIADA,
+  crearAutoguardado,
+  leerBorrador,
+  type InfoGuardado,
+} from '../../../src/app/laboratorio/autoguardado';
 import type { DocJSON } from '../../../src/tipos';
 import { doc, parrafo } from '../../ayudantes-doc';
 
@@ -268,5 +275,193 @@ describe('autoguardado', () => {
     expect(b.actualizadoServidor).toBe('2026-11-03T10:00:00Z');
     expect(typeof b.guardadoLocal).toBe('string');
     await ag.detener();
+  });
+});
+
+describe('autoguardado con varias pestañas (I1)', () => {
+  it('un guardado confirmado no borra el borrador que escribio otra pestaña', async () => {
+    let soltar!: () => void;
+    const lento = () => new Promise<unknown>((r) => (soltar = () => r({ actualizado: '2026-11-03T15:20:00Z' })));
+    const { api } = apiCon(lento);
+    const { ag } = crear(api);
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(ag.estado().estado).toBe('guardando');
+    // Mientras tanto, otra pestaña escribe su propio borrador en la misma clave.
+    const ajeno = JSON.stringify({ docJson: COPIA2, guardadoLocal: 'x', actualizadoServidor: null });
+    localStorage.setItem(CLAVE, ajeno);
+    soltar();
+    await avanzar(0);
+    expect(ag.estado().estado).toBe('guardado');
+    expect(localStorage.getItem(CLAVE)).toBe(ajeno);
+  });
+
+  it('confirmar deja la marca compartida con el actualizado del servidor', async () => {
+    const { api } = apiCon(ok);
+    const { ag } = crear(api);
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(ag.estado().estado).toBe('guardado');
+    expect(claveConfirmado(12, 3, 7)).toBe('mm:confirmado:12:3:7');
+    expect(localStorage.getItem('mm:confirmado:12:3:7')).toBe('2026-11-03T15:20:00Z');
+  });
+
+  it('si otra pestaña confirmo una copia mas nueva, no se envia: solo lectura y el borrador queda', async () => {
+    const { api, put } = apiCon(ok);
+    const { ag } = crear(api, { actualizado: '2026-11-03T15:00:00Z' });
+    localStorage.setItem('mm:confirmado:12:3:7', '2026-11-03T15:10:00Z');
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(put).not.toHaveBeenCalled();
+    expect(ag.estado().estado).toBe('error');
+    expect(ag.estado().codigo).toBe(COPIA_CAMBIADA);
+    expect(leerBorrador(localStorage, CLAVE)?.docJson).toEqual(COPIA);
+    ag.cambio(COPIA2);
+    await avanzar(120000);
+    expect(put).not.toHaveBeenCalled();
+    expect(leerBorrador(localStorage, CLAVE)?.docJson).toEqual(COPIA2);
+  });
+
+  it('una marca compartida mas vieja que la propia no detiene el guardado', async () => {
+    const { api, put } = apiCon(ok);
+    const { ag } = crear(api, { actualizado: '2026-11-03T15:00:00Z' });
+    localStorage.setItem('mm:confirmado:12:3:7', '2026-11-02T09:00:00Z');
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('tras un rato sin contacto compara actualizado con GET antes del PUT', async () => {
+    const put = vi.fn(ok);
+    let delServidor = '2026-11-03T15:00:00Z';
+    const get = vi.fn(async () => ({ docJson: COPIA, actualizado: delServidor, versionId: 7, sugerencias: [] }));
+    const api = { put, get } as unknown as Api;
+    const { ag } = crear(api, { actualizado: '2026-11-03T15:00:00Z', verificarTrasMs: 60_000 });
+    // Recién abierto: sin GET.
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(get).not.toHaveBeenCalled();
+    expect(put).toHaveBeenCalledTimes(1);
+    // Una hora después, el GET confirma que nada cambió: se envía.
+    delServidor = '2026-11-03T15:20:00Z'; // lo que respondió el PUT
+    await avanzar(3_600_000);
+    ag.cambio(COPIA2);
+    await avanzar(2000);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledTimes(2);
+    // Otra hora; ahora otro equipo guardó: no se pisa.
+    delServidor = '2026-11-03T17:00:00Z';
+    await avanzar(3_600_000);
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(ag.estado().codigo).toBe(COPIA_CAMBIADA);
+    expect(leerBorrador(localStorage, CLAVE)?.docJson).toEqual(COPIA);
+  });
+
+  it('un PUT que vencio pero el servidor si aplico no se confunde con otra pestaña', async () => {
+    // El primer PUT llega al servidor, pero la respuesta se pierde (plazo vencido).
+    let servidor: { docJson: DocJSON | null; actualizado?: string } = { docJson: null };
+    let n = 0;
+    const put = vi.fn(async (_r: string, cuerpo: unknown) => {
+      n++;
+      servidor = { docJson: (cuerpo as { docJson: DocJSON }).docJson, actualizado: `2026-11-03T15:2${n}:00Z` };
+      if (n === 1) {
+        await new Promise((r) => setTimeout(r, 90_000)); // el plazo largo de la API
+        throw new ErrorApi(0, SIN_CONEXION, 'no respondió a tiempo');
+      }
+      return { actualizado: servidor.actualizado };
+    });
+    const get = vi.fn(async () => ({ ...servidor, versionId: 7, sugerencias: [] }));
+    const api = { put, get } as unknown as Api;
+    const { ag } = crear(api, { verificarTrasMs: 60_000 });
+    await avanzar(120_000);
+    ag.cambio(COPIA);
+    await avanzar(2000 + 90_000); // GET (sin copia) + PUT que vence a los 90 s
+    expect(ag.estado().estado).toBe('sin-conexion');
+    await avanzar(2000); // reintento: el GET ve su propia copia, no otra
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(ag.estado().estado).toBe('guardado');
+  });
+
+  it('si el GET de verificacion falla por red, se reintenta como sin conexion', async () => {
+    const put = vi.fn(ok);
+    const get = vi.fn(async () => {
+      throw new ErrorApi(0, SIN_CONEXION, 'x');
+    });
+    const api = { put, get } as unknown as Api;
+    const { ag } = crear(api, { verificarTrasMs: 60_000 });
+    await avanzar(120_000);
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(ag.estado().estado).toBe('sin-conexion');
+    expect(put).not.toHaveBeenCalled();
+    await ag.detener();
+  });
+
+  it('abandonar detiene sin enviar, calla y devuelve lo no confirmado', async () => {
+    const { api, put } = apiCon(ok);
+    const { ag, estados } = crear(api);
+    ag.cambio(COPIA);
+    const n = estados.length;
+    const r = ag.abandonar();
+    expect(r.copia).toEqual(COPIA);
+    expect(r.enBorrador).toBe(true);
+    expect(leerBorrador(localStorage, CLAVE)?.docJson).toEqual(COPIA);
+    await avanzar(120000);
+    expect(put).not.toHaveBeenCalled();
+    expect(estados.length).toBe(n);
+  });
+
+  it('abandonar no pisa un borrador ajeno', async () => {
+    const { api } = apiCon(ok);
+    const { ag } = crear(api);
+    ag.cambio(COPIA);
+    const ajeno = JSON.stringify({ docJson: COPIA2, guardadoLocal: 'x', actualizadoServidor: null });
+    localStorage.setItem(CLAVE, ajeno);
+    const r = ag.abandonar();
+    expect(r.copia).toEqual(COPIA);
+    expect(r.enBorrador).toBe(false);
+    expect(localStorage.getItem(CLAVE)).toBe(ajeno);
+  });
+});
+
+describe('autoguardado con la red colgada (I2)', () => {
+  it('un PUT sin respuesta pasa a sin conexion a los 90 s y programa el reintento', async () => {
+    let n = 0;
+    const fetch = vi.fn(async () => {
+      n++;
+      if (n === 1) return new Promise<Response>(() => {}); // se cuelga
+      return new Response(JSON.stringify({ actualizado: '2026-11-03T15:20:00Z' }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const api = crearApi({ fetch, alSinSesion: () => {} });
+    api.fijarCsrf('tok');
+    const { ag } = crear(api);
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    expect(ag.estado().estado).toBe('guardando');
+    await avanzar(89_999);
+    expect(ag.estado().estado).toBe('guardando');
+    await avanzar(1);
+    expect(ag.estado().estado).toBe('sin-conexion');
+    expect(ag.estado().mensaje).toContain('Sin guardar: sin conexión, reintentando');
+    expect(leerBorrador(localStorage, CLAVE)?.docJson).toEqual(COPIA);
+    await avanzar(2000);
+    expect(n).toBe(2);
+    expect(ag.estado().estado).toBe('guardado');
+  });
+
+  it('detener no se queda esperando un PUT colgado mas alla del plazo', async () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof globalThis.fetch;
+    const api = crearApi({ fetch, alSinSesion: () => {} });
+    const { ag } = crear(api);
+    ag.cambio(COPIA);
+    await avanzar(2000);
+    let fin = false;
+    void ag.detener().then(() => (fin = true));
+    await avanzar(90_000);
+    expect(fin).toBe(true);
+    expect(leerBorrador(localStorage, CLAVE)?.docJson).toEqual(COPIA);
   });
 });

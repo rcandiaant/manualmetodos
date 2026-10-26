@@ -14,6 +14,19 @@
  * - 409 `version_obsoleta`: `error` con `codigo`, sin más envíos (la vista pasa a solo lectura). 413/422 y otros errores: `error`
  *   sin reintento automático; un cambio posterior vuelve a intentarlo.
  *
+ * - Varias pestañas (revisión final I1; la vista además da un solo escritor con `candado.ts`):
+ *   - al confirmar, el borrador se borra solo si sigue siendo el que escribió esta instancia
+ *     (el de otra pestaña no se toca);
+ *   - cada confirmación deja `actualizado` en `mm:confirmado:<usuarioId>:<capituloId>:<versionId>`.
+ *     Antes de cada PUT, si esa marca es posterior a la copia sobre la que se edita (otra
+ *     pestaña guardó después), no se envía: `error` con `codigo: 'copia_cambiada'`, terminal,
+ *     y el borrador queda;
+ *   - con `verificarTrasMs`, si pasó ese tiempo desde el último contacto con el servidor,
+ *     un `GET …/copia` compara `actualizado` antes del PUT (otro equipo, o una pestaña sin
+ *     candado); si no coincide, lo mismo;
+ *   - `abandonar()` detiene todo sin enviar (otra pestaña tomó el control) y devuelve la copia
+ *     no confirmada; la escribe en el borrador solo si la clave está libre o es suya.
+ *
  * - Task 5: `motivoDe` agrega el motivo a cada sugerencia del cuerpo (el servidor lo toma
  *   solo en las nuevas) y `alConfirmar` avisa al panel qué sugerencias quedaron en el servidor.
  *
@@ -21,9 +34,10 @@
  * queda en el borrador local y el estado visible dice por qué.
  */
 import { calcularSugerencias } from '../../cambios/sugerencias';
+import { jsonEstable } from '../../cambios/tokens';
 import type { DocJSON, Sugerencia } from '../../tipos';
 import { ErrorApi, SIN_CONEXION, type Api } from '../api';
-import type { CopiaEntrada, CopiaGuardada, FechaIso } from '../tipos-api';
+import type { Copia, CopiaEntrada, CopiaGuardada, FechaIso } from '../tipos-api';
 
 export type EstadoGuardado =
   | 'guardado'
@@ -68,6 +82,21 @@ export interface Borrador {
 export const claveBorrador = (usuarioId: number | string, capituloId: number | string, versionId: number | string) =>
   `mm:borrador:${usuarioId}:${capituloId}:${versionId}`;
 
+/** Último `actualizado` que confirmó el servidor a cualquier pestaña de este navegador. */
+export const claveConfirmado = (usuarioId: number | string, capituloId: number | string, versionId: number | string) =>
+  `mm:confirmado:${usuarioId}:${capituloId}:${versionId}`;
+
+/** Código del cliente: la copia del servidor cambió desde otra pestaña, ventana o equipo. */
+export const COPIA_CAMBIADA = 'copia_cambiada';
+
+/** ¿La marca `a` es posterior a `b`? (`b` null: no había copia). */
+function posterior(a: string, b: string | null): boolean {
+  if (b === null) return true;
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  return Number.isFinite(ta) && Number.isFinite(tb) ? ta > tb : a !== b;
+}
+
 export function leerBorrador(almacen: Storage | undefined, clave: string): Borrador | null {
   try {
     const crudo = almacen?.getItem(clave);
@@ -111,6 +140,11 @@ export interface OpcionesAutoguardado {
   motivoDe?: (s: Sugerencia) => string | undefined;
   /** Se llama tras cada PUT confirmado con las sugerencias tal como se enviaron. */
   alConfirmar?: (enviadas: Sugerencia[]) => void;
+  /**
+   * Si pasó este tiempo (ms) desde el último contacto con el servidor, un `GET …/copia`
+   * comprueba antes del PUT que nadie más guardó la copia. Sin valor, no se comprueba.
+   */
+  verificarTrasMs?: number;
 }
 
 export interface Autoguardado {
@@ -121,6 +155,11 @@ export interface Autoguardado {
   detener(): Promise<void>;
   /** Copia aún no confirmada por el servidor, o null. */
   sinConfirmar(): DocJSON | null;
+  /**
+   * Otra pestaña tomó el control: se detiene sin enviar nada más ni avisar a los oyentes.
+   * Devuelve la copia no confirmada y si quedó en el borrador local.
+   */
+  abandonar(): { copia: DocJSON | null; enBorrador: boolean };
 }
 
 const ESPERA_MAX_MS = 60_000;
@@ -144,6 +183,7 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
   const esperaMs = op.esperaMs ?? 2000;
   const usuarioId = op.autor.replace(/^u/, '');
   const clave = claveBorrador(usuarioId, op.capituloId, op.versionId);
+  const claveMarca = claveConfirmado(usuarioId, op.capituloId, op.versionId);
   const oyentes: ((e: InfoGuardado) => void)[] = [];
 
   let info: InfoGuardado = { estado: 'guardado', mensaje: MENSAJES.guardado };
@@ -158,6 +198,13 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
   let terminal = false;
   let detenido = false;
   let borradorFallido = false;
+  /** Lo último que esta instancia escribió en el borrador (para no borrar el de otra pestaña). */
+  let ultimoEscrito: string | null = null;
+  /** Último contacto con el servidor (apertura, PUT confirmado o verificación). */
+  let ultimoContacto = reloj.ahora().getTime();
+  let abandonado = false;
+  /** Última copia enviada con PUT, haya respondido o no el servidor. */
+  let ultimoIntento: DocJSON | null = null;
   /** Mensaje del último estado, sin el aviso del borrador. */
   let mensajeBase = MENSAJES.guardado;
 
@@ -170,6 +217,7 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
       ...(info.ultimoGuardado ? { ultimoGuardado: info.ultimoGuardado } : {}),
       ...(codigo ? { codigo } : {}),
     };
+    if (abandonado) return;
     for (const fn of oyentes) {
       try {
         fn(info);
@@ -183,11 +231,63 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
     const b: Borrador = { docJson: copia, guardadoLocal: reloj.ahora().toISOString(), actualizadoServidor };
     try {
       if (!op.almacen) throw new Error('sin almacén');
-      op.almacen.setItem(clave, JSON.stringify(b));
+      const texto = JSON.stringify(b);
+      op.almacen.setItem(clave, texto);
+      ultimoEscrito = texto;
       borradorFallido = false;
     } catch {
       borradorFallido = true;
     }
+  }
+
+  /** Borra el borrador solo si sigue siendo el que escribió esta instancia. */
+  function borrarBorradorPropio(): void {
+    try {
+      if (op.almacen && ultimoEscrito !== null && op.almacen.getItem(clave) === ultimoEscrito) {
+        borrarBorrador(op.almacen, clave);
+      }
+    } catch {
+      // almacén no disponible
+    }
+    ultimoEscrito = null;
+  }
+
+  function leerMarca(): string | null {
+    try {
+      return op.almacen?.getItem(claveMarca) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function dejarMarca(actualizado: string): void {
+    try {
+      const previa = op.almacen?.getItem(claveMarca) ?? null;
+      if (previa === null || posterior(actualizado, previa)) op.almacen?.setItem(claveMarca, actualizado);
+    } catch {
+      // almacén no disponible
+    }
+  }
+
+  const copiaCambiada = () =>
+    new ErrorApi(409, COPIA_CAMBIADA, 'La copia de este capítulo cambió en el servidor desde otra pestaña, ventana o equipo.');
+
+  /** Antes del PUT: ¿alguien más guardó la copia sobre la que se edita? Lanza `copia_cambiada`. */
+  async function verificar(): Promise<void> {
+    const marca = leerMarca();
+    if (marca !== null && posterior(marca, actualizadoServidor)) throw copiaCambiada();
+    if (op.verificarTrasMs === undefined || reloj.ahora().getTime() - ultimoContacto < op.verificarTrasMs) return;
+    const c = await op.api.get<Copia>(`/capitulos/${op.capituloId}/copia`);
+    const delServidor = c.docJson === null ? null : (c.actualizado ?? null);
+    if (delServidor !== actualizadoServidor) {
+      // Un PUT propio que el servidor aplicó pero cuya respuesta se perdió (plazo vencido)
+      // no es trabajo de otra pestaña: se adopta su `actualizado`.
+      const propio = c.docJson !== null && ultimoIntento !== null && jsonEstable(c.docJson) === jsonEstable(ultimoIntento);
+      if (!propio) throw copiaCambiada();
+      actualizadoServidor = delServidor;
+      if (delServidor !== null) dejarMarca(delServidor);
+    }
+    ultimoContacto = reloj.ahora().getTime();
   }
 
   function cancelar(): void {
@@ -223,6 +323,11 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
       if (e.estado === 409 && e.codigo === 'etapa_no_permite') {
         terminal = true;
         fijar('cerrada', `${MENSAJES.cerrada} ${e.message}`, e.codigo);
+        return;
+      }
+      if (e.codigo === COPIA_CAMBIADA) {
+        terminal = true;
+        fijar('error', `${MENSAJES.error}: ${e.message}`, e.codigo);
         return;
       }
       if (e.estado === 409 && e.codigo === 'version_obsoleta') {
@@ -264,18 +369,25 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
           return motivo ? { ...s, motivo } : s;
         });
         const cuerpo: CopiaEntrada = { versionId: op.versionId, docJson: copia, sugerencias };
+        await verificar();
+        if (abandonado) return;
+        ultimoIntento = copia;
         const r = await op.api.put<CopiaGuardada>(`/capitulos/${op.capituloId}/copia`, cuerpo);
+        ultimoContacto = reloj.ahora().getTime();
+        if (typeof r?.actualizado === 'string') {
+          actualizadoServidor = r.actualizado;
+          dejarMarca(r.actualizado);
+        }
         try {
           op.alConfirmar?.(sugerencias);
         } catch (e) {
           console.error('Error en alConfirmar del autoguardado', e);
         }
         siguienteEspera = PRIMER_REINTENTO_MS;
-        if (typeof r?.actualizado === 'string') actualizadoServidor = r.actualizado;
         info = { ...info, ultimoGuardado: reloj.ahora() };
         if (pendiente === copia) {
           pendiente = null;
-          borrarBorrador(op.almacen, clave);
+          borrarBorradorPropio();
           fijar('guardado');
         } else {
           // Llegaron cambios durante el envío: se guardan tras la espera normal.
@@ -351,5 +463,21 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
       cancelar(); // un fallo del último envío no deja reintentos vivos
     },
     sinConfirmar: () => pendiente,
+    abandonar() {
+      abandonado = true;
+      detenido = true;
+      terminal = true;
+      cancelar();
+      if (!pendiente) return { copia: null, enBorrador: false };
+      let libre: boolean;
+      try {
+        const actual = op.almacen?.getItem(clave) ?? null;
+        libre = actual === null || actual === ultimoEscrito;
+      } catch {
+        libre = false;
+      }
+      if (libre) escribirBorrador(pendiente);
+      return { copia: pendiente, enBorrador: libre && !borradorFallido };
+    },
   };
 }

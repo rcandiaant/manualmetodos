@@ -164,7 +164,7 @@ function vistaAtomo(crear: (n: ProseMirrorNode) => HTMLElement): NodeViewRendere
 
 function katexEn(el: HTMLElement, latex: string, displayMode: boolean): HTMLElement {
   try {
-    katex.render(latex, el, { displayMode, throwOnError: false });
+    katex.render(latex, el, { displayMode, throwOnError: false, trust: false });
   } catch {
     el.textContent = latex; // KaTeX no pudo: se muestra la fuente
   }

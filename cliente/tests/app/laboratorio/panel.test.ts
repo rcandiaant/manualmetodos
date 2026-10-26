@@ -264,7 +264,7 @@ describe('panel del laboratorio: edicion final', () => {
 
 describe('panel del laboratorio: borradores tras el cierre', () => {
   const MOTIVOS = 'mm:motivos:12:3:7';
-  const COMENTARIOS = 'mm:comentarios:12:3';
+  const COMENTARIOS = 'mm:comentarios:12:3:7';
   function sembrarBorradores() {
     localStorage.setItem(MOTIVOS, JSON.stringify({ 'u12:p1:x': { texto: 'Motivo perdido.', bloqueId: 'p1' } }));
     localStorage.setItem(

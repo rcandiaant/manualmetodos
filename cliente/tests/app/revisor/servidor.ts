@@ -25,6 +25,8 @@ export interface OpcionesMontar {
   final?: Final | null;
   /** Respuesta propia para una petición (undefined: la respuesta por omisión). */
   responder?: (p: Peticion) => Response | undefined;
+  /** Usuario revisor (40 por omisión). */
+  usuarioId?: number;
 }
 
 const montadas: { desmontar(): unknown }[] = [];
@@ -67,7 +69,7 @@ export async function montarVista(op: OpcionesMontar = {}) {
   const api = crearApi({ fetch: fetchRuta, alSinSesion: () => {} });
   const raiz = document.createElement('div');
   document.body.append(raiz);
-  const vista = vistaRevisor(api, 3);
+  const vista = vistaRevisor(api, 3, undefined, op.usuarioId ?? 40);
   montadas.push(vista);
   vista.montar(raiz);
   await vista.listo;

@@ -1,6 +1,8 @@
 /**
  * Inicio (`#/capitulos`): banner de etapa con las fechas de la consulta en hora de Chile,
  * lista de capítulos con contadores y enlaces según los roles (docs/api.md §4.1–4.2).
+ * «Salir» avisa en la página si quedan borradores propios sin enviar en este navegador
+ * (no se borran: el principio rector pide no perder trabajo).
  */
 import { boton, el, mensajeDe } from '../editor/ui';
 import { ErrorApi, SIN_CONEXION, type Api } from './api';
@@ -62,6 +64,37 @@ function mensajeError(e: unknown): string {
 
 export interface DepsInicio {
   salir: () => Promise<void>;
+  /** localStorage por defecto. */
+  almacen?: Storage;
+}
+
+/** Prefijos de los borradores locales de una persona (laboratorio y revisor). */
+const prefijosBorrador = (usuarioId: number) =>
+  ['borrador', 'motivos', 'comentarios', 'revisor:final'].map((t) => `mm:${t}:${usuarioId}:`);
+
+/** ¿Quedan borradores propios con contenido en este navegador? */
+export function hayBorradoresPropios(almacen: Storage | undefined, usuarioId: number): boolean {
+  try {
+    if (!almacen) return false;
+    const prefijos = prefijosBorrador(usuarioId);
+    for (let i = 0; i < almacen.length; i++) {
+      const clave = almacen.key(i);
+      if (!clave || !prefijos.some((p) => clave.startsWith(p))) continue;
+      const valor = almacen.getItem(clave);
+      if (valor && valor !== '{}' && valor !== 'null') return true;
+    }
+  } catch {
+    // sin almacenamiento local
+  }
+  return false;
+}
+
+function almacenLocal(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { listo: Promise<void> } {
@@ -72,7 +105,7 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
   const esRevisor = tieneRol(u, 'revisor');
   const esAdmin = tieneRol(u, 'admin');
 
-  function fila(c: CapituloLista): HTMLElement {
+  function fila(c: CapituloLista, etapa: Etapa): HTMLElement {
     const datos: string[] = [];
     if (esLab) datos.push(plural(c.misCambios, 'cambio', 'cambios'), plural(c.misComentarios, 'comentario', 'comentarios'));
     if (esRevisor) {
@@ -83,7 +116,11 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
       );
     }
     const acciones: HTMLElement[] = [];
-    if (esLab) acciones.push(el('a', { href: `#/capitulo/${c.id}`, class: 'enlace-boton' }, 'Abrir en el editor'));
+    if (esLab) {
+      // Fuera de la consulta la vista del capítulo es de solo lectura.
+      const texto = etapa === 'consulta' ? 'Abrir en el editor' : 'Ver capítulo';
+      acciones.push(el('a', { href: `#/capitulo/${c.id}`, class: 'enlace-boton' }, texto));
+    }
     if (esRevisor) acciones.push(el('a', { href: `#/revisar/${c.id}`, class: 'enlace-boton' }, 'Revisar'));
     return el(
       'li',
@@ -99,6 +136,40 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
       const banner = el('div', { class: 'banner-etapa' }, 'Cargando…');
       const lista = el('ul', { class: 'capitulos' });
       const errores = el('div', { class: 'error', role: 'alert', hidden: '' });
+      const avisoSalir = el('div', { class: 'aviso aviso-salir', role: 'alert', hidden: '' });
+
+      const salirYa = () =>
+        void deps.salir().catch((e: unknown) => {
+          errores.textContent = mensajeError(e);
+          errores.hidden = false;
+        });
+      const pedirSalir = () => {
+        if (!hayBorradoresPropios(deps.almacen ?? almacenLocal(), u.id)) {
+          salirYa();
+          return;
+        }
+        avisoSalir.replaceChildren(
+          el(
+            'p',
+            {},
+            'Hay cambios sin guardar en este navegador. Vuelva a abrir esos capítulos para que se guarden (o cópielos) antes de salir; si sale igual, quedan solo en este navegador.',
+          ),
+          el(
+            'div',
+            { class: 'botones' },
+            boton('Cancelar', () => (avisoSalir.hidden = true), 'primario'),
+            boton(
+              'Salir de todos modos',
+              () => {
+                avisoSalir.hidden = true;
+                salirYa();
+              },
+              'secundario',
+            ),
+          ),
+        );
+        avisoSalir.hidden = false;
+      };
 
       const menuAdmin = esAdmin ? el('a', { href: '#/admin', class: 'enlace-boton' }, 'Administración') : null;
       const cabecera = el(
@@ -109,13 +180,10 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
           'div',
           { class: 'cabecera-acciones' },
           menuAdmin,
-          boton('Salir', () => void deps.salir().catch((e: unknown) => {
-            errores.textContent = mensajeError(e);
-            errores.hidden = false;
-          })),
+          boton('Salir', pedirSalir),
         ),
       );
-      raiz.append(el('main', { class: 'app' }, cabecera, banner, errores, el('h2', {}, 'Capítulos'), lista));
+      raiz.append(el('main', { class: 'app' }, cabecera, banner, errores, avisoSalir, el('h2', {}, 'Capítulos'), lista));
 
       listo = Promise.all([api.get<Consulta>('/consulta'), api.get<CapituloLista[]>('/capitulos')]).then(
         ([consulta, capitulos]) => {
@@ -126,7 +194,7 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
           } catch {
             banner.textContent = 'No se pudieron mostrar las fechas de la consulta.';
           }
-          lista.replaceChildren(...capitulos.map(fila));
+          lista.replaceChildren(...capitulos.map((c) => fila(c, consulta.etapa)));
           if (capitulos.length === 0) lista.append(el('li', { class: 'vacio' }, 'Todavía no hay capítulos publicados.'));
         },
         (e: unknown) => {

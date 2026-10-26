@@ -12,7 +12,7 @@
  *   y se borran (`DELETE`, con confirmación en la página). Cada uno queda anclado a su
  *   bloque con una decoración en el editor.
  * - Texto no enviado (comentario nuevo o edición): queda en el campo y en un borrador local
- *   (`mm:comentarios:<usuarioId>:<capituloId>`). Los fallos se muestran con `role="alert"`
+ *   (`mm:comentarios:<usuarioId>:<capituloId>:<versionId>`). Los fallos se muestran con `role="alert"`
  *   y el mismo botón reintenta. Una edición recuperada cuyo comentario no está en la lista
  *   se conserva en el borrador: si la lista cargó (el comentario ya no existe) se muestra
  *   para copiar con "Descartar"; si la carga falló, se guarda hasta que cargue.
@@ -125,7 +125,8 @@ export function decoracionesComentarios(doc: ProseMirrorNode, comentarios: Comen
   return decos;
 }
 
-export const claveComentarios = (usuarioId: number, capituloId: number) => `mm:comentarios:${usuarioId}:${capituloId}`;
+export const claveComentarios = (usuarioId: number, capituloId: number, versionId: number) =>
+  `mm:comentarios:${usuarioId}:${capituloId}:${versionId}`;
 
 interface BorradorComentarios {
   nuevo?: Ancla & { texto: string };
@@ -136,6 +137,8 @@ export interface OpcionesComentarios {
   api: Api;
   capituloId: number;
   usuarioId: number;
+  /** Versión base vigente (para la clave del borrador local). */
+  versionId: number;
   almacen?: Storage;
   editor(): Editor | null;
   /** Los comentarios cambiaron: hay que redibujar sus anclas. */
@@ -171,7 +174,7 @@ interface EstadoItem {
 }
 
 export function crearComentarios(op: OpcionesComentarios): Comentarios {
-  const clave = claveComentarios(op.usuarioId, op.capituloId);
+  const clave = claveComentarios(op.usuarioId, op.capituloId, op.versionId);
   let comentarios: Comentario[] = [];
   const items = new Map<number, EstadoItem>();
   let habilitado = false;

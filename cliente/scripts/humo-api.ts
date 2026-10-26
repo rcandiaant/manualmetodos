@@ -3,7 +3,8 @@
  *
  * Uso (desde cliente/, con el stack `manualmetodos` levantado y la base migrada):
  *   npm run humo
- * Variable opcional: HUMO_URL (por omisión http://localhost:8080).
+ * Variable opcional: HUMO_URL (por omisión http://localhost:8080). Solo se acepta localhost o
+ * 127.0.0.1: el SQL de desarrollo va siempre a la base local de Docker.
  *
  * Recorre el flujo completo con las mismas funciones del cliente: `crearApi` (src/app/api.ts)
  * con un `fetch` inyectado que agrega la URL base, un frasco de cookies propio y la cabecera
@@ -24,14 +25,14 @@ import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { aplicarSugerencias, completarGrupo } from '../src/cambios/aplicar';
 import { claveGrupo, detectarConflictos } from '../src/cambios/conflictos';
 import { calcularSugerencias } from '../src/cambios/sugerencias';
 import { esquemaManual, validarDocumento } from '../src/esquema/esquema';
 import { exportarLatex } from '../src/latex/exportar';
 import { importarLatex } from '../src/latex/importar';
 import { crearApi, ErrorApi, type Api } from '../src/app/api';
-import { representantes } from '../src/app/revisor/panel';
+import { componerFinal } from '../src/app/revisor/componer';
+import { esUrlLocal } from './humo-local';
 import type {
   Aportes,
   Base,
@@ -76,6 +77,28 @@ function comprobar(condicion: unknown, texto: string): asserts condicion {
 
 /* ---------- Docker (solo desarrollo) ---------- */
 
+/**
+ * El SQL de desarrollo y `crear-admin.php` van siempre a la base del stack Docker local:
+ * contra otro servidor la prueba no corre.
+ */
+function exigirLocal(): void {
+  if (!esUrlLocal(URL_BASE)) {
+    throw new FalloHumo(
+      `HUMO_URL (${URL_BASE}) no es localhost ni 127.0.0.1: la prueba de humo usa SQL de desarrollo sobre la base local de Docker y no se ejecuta contra otro servidor.`,
+    );
+  }
+}
+
+/** Últimas líneas del .log de pdflatex, para ver la causa de un fallo. */
+function colaDelLog(carpeta: string, nombre: string): string {
+  try {
+    const lineas = readFileSync(join(carpeta, `${nombre}.log`), 'utf8').split(/\r?\n/).filter((l) => l.trim() !== '');
+    return `\n--- final de ${nombre}.log ---\n${lineas.slice(-25).join('\n')}`;
+  } catch {
+    return '';
+  }
+}
+
 function docker(args: string[]): string {
   const r = spawnSync('docker', ['compose', ...args], { cwd: RAIZ, encoding: 'utf8', timeout: 120_000 });
   if (r.error || r.status !== 0) {
@@ -86,6 +109,7 @@ function docker(args: string[]): string {
 
 /** SQL de desarrollo contra la base `manual` del servicio `bd` (credenciales de compose.yaml). */
 function sqlDesarrollo(sql: string): string {
+  exigirLocal();
   console.log(`  SQL de desarrollo: ${sql}`);
   return docker(['exec', '-T', 'bd', 'mariadb', '-umanual', '-pmanual_dev', 'manual', '-e', sql]);
 }
@@ -199,6 +223,7 @@ async function main(): Promise<void> {
   console.log(`Prueba de humo contra ${URL_BASE} (corrida ${sello})`);
 
   paso('0. Preparación de la base de desarrollo');
+  exigirLocal();
   const salud = await (await fetch(`${URL_BASE}/api/salud`)).json();
   comprobar((salud as { estado?: string }).estado === 'ok', 'GET /api/salud responde ok');
   sqlDesarrollo('UPDATE consulta SET apertura = NULL, cierre = NULL, motivo_obligatorio = 0 WHERE id = 1');
@@ -366,7 +391,7 @@ async function main(): Promise<void> {
   );
 
   paso('6. Los laboratorios comentan');
-  const c1 = await labs[1].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+  await labs[1].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
     bloqueId: 'b2',
     rango: { desde: 0, hasta: 4 },
     texto: 'Proponemos «partido»; conversarlo en la reunión.',
@@ -390,7 +415,6 @@ async function main(): Promise<void> {
   );
   const comNorte = await labs[0].api.get<Comentario[]>(`/capitulos/${cap.id}/comentarios`);
   comprobar(comNorte.length === 0, 'Norte no ve los comentarios de otros laboratorios');
-  void c1;
 
   paso('7. Se adelanta el cierre (SQL de desarrollo: la API no admite fechas pasadas)');
   sqlDesarrollo(
@@ -457,14 +481,11 @@ async function main(): Promise<void> {
     'Centro ve en mis-aportes solo lo suyo, con la decisión y la nota',
   );
 
-  // Componer como «Componer versión final» (src/app/revisor/final.ts, componer()).
+  // Compone con la misma función que «Componer versión final» (src/app/revisor/componer.ts).
   const baseRev = await revisor.api.get<Base>(`/capitulos/${cap.id}/base`);
-  const vigentes = aportes2.sugerencias.filter((s) => s.versionId === undefined || s.versionId === baseRev.versionId);
-  const aceptadas = vigentes.filter((s) => s.estado === 'aceptada');
-  const completas = completarGrupo(aceptadas, vigentes, vigentes.filter((s) => s.estado !== 'aceptada'));
-  const conjunto = completarGrupo(representantes(completas as SugerenciaServidor[]).sugs, vigentes);
-  const compuesta = normalizar(aplicarSugerencias(baseRev.docJson, conjunto));
-  comprobar(validarDocumento(compuesta).ok, `versión compuesta con ${aceptadas.length} aceptadas; cumple el esquema`);
+  const composicion = componerFinal(baseRev.docJson, aportes2.sugerencias, baseRev.versionId);
+  const compuesta = normalizar(composicion.doc);
+  comprobar(validarDocumento(compuesta).ok, `versión compuesta con ${composicion.aceptadas} aceptadas; cumple el esquema`);
   const texto = textoPlano(compuesta);
   comprobar(
     texto.includes('dividido') &&
@@ -490,7 +511,10 @@ async function main(): Promise<void> {
   copyFileSync(MARCO, join(carpeta, 'marco-prueba.tex'));
   writeFileSync(join(carpeta, 'humo-final.tex'), guardada.tex.replace(/\r\n?/g, '\n'), 'utf8');
   const comp = compilar(carpeta, 'humo-final');
-  comprobar(comp.ok, `pdflatex compila el .tex final con marco-prueba.tex (${join(carpeta, 'humo-final.pdf')})`);
+  if (!comp.ok) {
+    throw new FalloHumo(`pdflatex no compiló el .tex final (${carpeta}): ${comp.detalle ?? 'sin detalle'}${colaDelLog(carpeta, 'humo-final')}`);
+  }
+  ok(`pdflatex compila el .tex final con marco-prueba.tex (${join(carpeta, 'humo-final.pdf')})`);
   comprobar(comp.sinResolver.length === 0, 'sin referencias sin resolver');
 
   await admin.api.del('/sesion');

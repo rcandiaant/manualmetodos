@@ -99,13 +99,13 @@ describe('comentarios del laboratorio', () => {
     expect(alerta.hidden).toBe(false);
     expect(alerta.textContent).toContain('No se pudo guardar el comentario');
     expect(area.value).toBe('No se pierde.');
-    expect(localStorage.getItem('mm:comentarios:12:3')).toContain('No se pierde.');
+    expect(localStorage.getItem('mm:comentarios:12:3:7')).toContain('No se pierde.');
     fallar = false;
     botonTexto(form, 'Guardar comentario')!.click();
     await vi.advanceTimersByTimeAsync(0);
     expect(llamadas.filter((l) => l.metodo === 'POST')).toHaveLength(2);
     expect(form.hidden).toBe(true);
-    expect(localStorage.getItem('mm:comentarios:12:3')).toBeNull();
+    expect(localStorage.getItem('mm:comentarios:12:3:7')).toBeNull();
   });
 
   it('editar y borrar comentario propio', async () => {
@@ -197,7 +197,7 @@ describe('comentarios del laboratorio', () => {
   });
 
   it('edicion recuperada de un comentario que ya no existe se conserva y se ofrece para copiar', async () => {
-    localStorage.setItem('mm:comentarios:12:3', JSON.stringify({ ediciones: { '9': 'Texto editado.' } }));
+    localStorage.setItem('mm:comentarios:12:3:7', JSON.stringify({ ediciones: { '9': 'Texto editado.' } }));
     const { vista, raiz } = montar({ base: BASE, comentarios: [PROPIO] });
     await vista.listo;
     await vi.advanceTimersByTimeAsync(0);
@@ -211,14 +211,14 @@ describe('comentarios del laboratorio', () => {
     botonTexto(raiz, 'Comentar')!.click();
     escribirCampo(raiz.querySelector('.comentario-nuevo textarea') as HTMLTextAreaElement, 'Otro.');
     botonTexto(raiz.querySelector('.comentario-nuevo') as HTMLElement, 'Cancelar')!.click();
-    expect(localStorage.getItem('mm:comentarios:12:3')).toContain('Texto editado.');
+    expect(localStorage.getItem('mm:comentarios:12:3:7')).toContain('Texto editado.');
     botonTexto(caja, 'Descartar')!.click();
     expect(caja.hidden).toBe(true);
-    expect(localStorage.getItem('mm:comentarios:12:3')).toBeNull();
+    expect(localStorage.getItem('mm:comentarios:12:3:7')).toBeNull();
   });
 
   it('edicion recuperada se conserva si fallo la carga de comentarios', async () => {
-    localStorage.setItem('mm:comentarios:12:3', JSON.stringify({ ediciones: { '5': 'Editado sin enviar.' } }));
+    localStorage.setItem('mm:comentarios:12:3:7', JSON.stringify({ ediciones: { '5': 'Editado sin enviar.' } }));
     let fallar = true;
     const { vista, raiz } = montar({
       base: BASE,
@@ -232,7 +232,7 @@ describe('comentarios del laboratorio', () => {
     ed.commands.setTextSelection({ from: p, to: p + 3 });
     botonTexto(raiz, 'Comentar')!.click();
     escribirCampo(raiz.querySelector('.comentario-nuevo textarea') as HTMLTextAreaElement, 'Otro.');
-    expect(localStorage.getItem('mm:comentarios:12:3')).toContain('Editado sin enviar.');
+    expect(localStorage.getItem('mm:comentarios:12:3:7')).toContain('Editado sin enviar.');
     expect((raiz.querySelector('.ediciones-huerfanas') as HTMLElement).hidden).toBe(true);
     fallar = false;
     botonTexto(seccion(raiz), 'Reintentar')!.click();
@@ -273,7 +273,7 @@ describe('comentarios del laboratorio', () => {
   });
 
   it('borrador de comentarios anterior sobrevive si se comenta antes de que cargue la lista', async () => {
-    const CLAVE_C = 'mm:comentarios:12:3';
+    const CLAVE_C = 'mm:comentarios:12:3:7';
     localStorage.setItem(
       CLAVE_C,
       JSON.stringify({

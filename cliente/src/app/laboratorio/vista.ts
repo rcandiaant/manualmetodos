@@ -16,6 +16,15 @@
  * - Panel lateral (Task 5): "Mis cambios" con motivos (`panel.ts`), comentarios
  *   (`comentarios.ts`, botón "Comentar" en la barra) y, en `edicion_final`, "Mis aportes".
  *   En solo lectura los motivos y comentarios no se editan, pero las listas se ven.
+ * - Un solo escritor por usuario y capítulo (revisión final I1, regla R5; `candado.ts`):
+ *   - si el capítulo ya está abierto en otra pestaña o ventana, esta se abre en solo lectura
+ *     con un aviso y el botón «Tomar el control»;
+ *   - cuando recibe el control (la otra se cerró, salió del capítulo o se lo tomó), vuelve a
+ *     cargar todo desde el servidor antes de habilitar la edición;
+ *   - si otra pestaña le toma el control, deja de guardar al instante, pasa a solo lectura y
+ *     ofrece copiar lo que no alcanzó a guardarse;
+ *   - el autoguardado además compara `actualizado` antes de enviar (`copia_cambiada`), con el
+ *     mismo trato que `version_obsoleta`.
  */
 import { Editor } from '@tiptap/core';
 import { avisosNoCubiertos } from '../../cambios/estructura';
@@ -33,6 +42,7 @@ import type { Base, Consulta, Copia, FechaIso, Usuario } from '../tipos-api';
 import {
   borrarBorrador,
   claveBorrador,
+  COPIA_CAMBIADA,
   crearAutoguardado,
   leerBorrador,
   MENSAJES,
@@ -41,6 +51,7 @@ import {
   type InfoGuardado,
   type Reloj,
 } from './autoguardado';
+import { abrirCandado, claveCandado, type Candado } from './candado';
 import { crearComentarios, type Comentarios } from './comentarios';
 import './laboratorio.css';
 import { cajaBorradoresSinEnviar, crearMisAportes, crearPanelCambios, type PanelCambios } from './panel';
@@ -50,12 +61,19 @@ export interface DepsCapitulo {
   almacen?: Storage;
   esperaMs?: number;
   reloj?: Reloj;
+  /** `navigator.locks` por defecto; `null` usa el respaldo con localStorage (pruebas). */
+  locks?: LockManager | null;
 }
 
 export type VistaCapitulo = Vista & { listo: Promise<void>; editor(): Editor | null };
 
 /** Espera tras la última tecla antes de recalcular marcas y avisar al autoguardado. */
 const ESPERA_RECALCULO_MS = 300;
+
+/** Tras este tiempo sin contacto con el servidor, el autoguardado comprueba la copia antes de enviar. */
+const VERIFICAR_TRAS_MS = 60_000;
+
+const SOLO_LECTURA_PESTANA = 'Solo lectura (abierto en otra pestaña)';
 
 function almacenLocal(): Storage | undefined {
   try {
@@ -95,8 +113,19 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
   let cerrada = false;
   let temporizador: ReturnType<typeof setTimeout> | null = null;
   let intervalo: ReturnType<typeof setInterval> | null = null;
+  let candado: Candado | null = null;
+  /** Otra pestaña o ventana tiene el control de este capítulo: aquí solo se lee. */
+  let sinControl = false;
+  let cargando = false;
+  let capituloActual = 0;
+  /** Copia que no alcanzó a guardarse cuando otra pestaña tomó el control (se ofrece para copiar). */
+  let huerfana: DocJSON | null = null;
 
   const titulo = el('h1', {}, 'Capítulo');
+  const errorCarga = el('div', { class: 'error', role: 'alert' });
+  errorCarga.hidden = true;
+  const avisoPestana = el('div', { class: 'aviso aviso-pestana', role: 'status' });
+  avisoPestana.hidden = true;
   const estado = el('span', { class: 'estado-guardado', 'aria-live': 'polite' });
   const avisoEtapa = el('div', { class: 'aviso aviso-etapa' });
   avisoEtapa.hidden = true;
@@ -216,7 +245,8 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
   function alCambiarEstado(info: InfoGuardado): void {
     if (!vigente) return;
     pintarIndicador(info);
-    const obsoleta = info.estado === 'error' && info.codigo === 'version_obsoleta';
+    const cambiada = info.estado === 'error' && info.codigo === COPIA_CAMBIADA;
+    const obsoleta = (info.estado === 'error' && info.codigo === 'version_obsoleta') || cambiada;
     if (info.estado === 'cerrada' || obsoleta) {
       // Fallo terminal: el borrador ya no se podrá enviar (la clave es de esta versión base).
       cerrada = true;
@@ -227,9 +257,11 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
         el(
           'strong',
           {},
-          obsoleta
-            ? 'La versión del capítulo cambió en el servidor: esta página quedó en solo lectura. Recárguela para seguir sobre la versión vigente. '
-            : 'La consulta se cerró: el capítulo quedó en solo lectura. ',
+          cambiada
+            ? 'La copia de este capítulo cambió en el servidor desde otra pestaña, ventana o equipo: para no reemplazar ese trabajo, esta página no envió sus últimos cambios y quedó en solo lectura. Recárguela para seguir sobre la copia vigente. '
+            : obsoleta
+              ? 'La versión del capítulo cambió en el servidor: esta página quedó en solo lectura. Recárguela para seguir sobre la versión vigente. '
+              : 'La consulta se cerró: el capítulo quedó en solo lectura. ',
         ),
         pendiente
           ? 'Los últimos cambios no alcanzaron a guardarse en el servidor. Quedan en este navegador; puede copiarlos aquí:'
@@ -300,11 +332,147 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
     avisoBorrador.hidden = false;
   }
 
+  /* ---------- Un solo escritor por usuario y capítulo (I1) ---------- */
+
+  /** Aviso de la otra pestaña y, si quedó algo sin guardar al perder el control, la caja para copiarlo. */
+  function pintarAvisoPestana(perdido: boolean): void {
+    const partes: (Node | string)[] = [];
+    if (sinControl) {
+      partes.push(
+        el(
+          'p',
+          {},
+          el(
+            'strong',
+            {},
+            perdido
+              ? 'Otra pestaña o ventana tomó el control de este capítulo: aquí quedó en solo lectura.'
+              : 'Este capítulo está abierto en otra pestaña o ventana de este navegador: aquí se muestra en solo lectura.',
+          ),
+          ' Solo una puede editarlo a la vez, para que ninguna reemplace lo que guarda la otra. ' +
+            'Cuando la otra se cierre o salga del capítulo, esta pasará a editar sola, con lo último guardado.',
+        ),
+        el(
+          'div',
+          { class: 'botones' },
+          boton('Tomar el control', () => candado?.tomar(), 'primario'),
+          el('span', { class: 'nota' }, ' La otra pestaña quedará en solo lectura.'),
+        ),
+      );
+      if (perdido && (panelCambios?.sinGuardar() || comentarios?.sinGuardar())) {
+        partes.push(el('p', {}, 'Hay motivos o comentarios sin guardar: siguen en sus campos del panel para que pueda copiarlos.'));
+      }
+    }
+    if (huerfana) {
+      partes.push(
+        el('p', {}, 'Los últimos cambios de esta pestaña no alcanzaron a guardarse en el servidor. Puede copiarlos aquí:'),
+        cajaCopiar(huerfana),
+        el(
+          'div',
+          { class: 'botones' },
+          boton(
+            'Descartarlos',
+            () => {
+              huerfana = null;
+              pintarAvisoPestana(perdido);
+            },
+            'secundario',
+          ),
+        ),
+      );
+    }
+    avisoPestana.replaceChildren(...partes);
+    avisoPestana.hidden = partes.length === 0;
+  }
+
+  /** Otra pestaña tomó el control: no se envía nada más y lo no guardado se ofrece para copiar. */
+  function perderControl(): void {
+    if (!ag) return;
+    // Lo último escrito que aún espera los 300 ms del recálculo.
+    if (temporizador !== null) {
+      clearTimeout(temporizador);
+      temporizador = null;
+      const copia = recalcular();
+      if (copia) ag.cambio(copia);
+    }
+    const r = ag.abandonar();
+    ag = null;
+    sinControl = true;
+    soloLectura = true;
+    fijarEditable(false);
+    errorGuardado.hidden = true;
+    if (r.copia) huerfana = r.copia;
+    estado.className = 'estado-guardado';
+    estado.textContent = SOLO_LECTURA_PESTANA;
+    pintarAvisoPestana(true);
+  }
+
+  function alCambiarControl(propio: boolean): void {
+    if (!vigente || cargando) return; // al terminar la carga se revisa
+    revisarControl(propio);
+  }
+
+  function revisarControl(propio: boolean): void {
+    if (propio && sinControl) void reiniciar();
+    else if (!propio && !sinControl && ag && !cerrada) perderControl();
+  }
+
+  /** Deja la vista como recién creada (sin editor ni autoguardado) para cargar de nuevo. */
+  function limpiar(): void {
+    if (intervalo !== null) clearInterval(intervalo);
+    intervalo = null;
+    if (temporizador !== null) clearTimeout(temporizador);
+    temporizador = null;
+    barra?.destruir();
+    barra = null;
+    editor?.destroy();
+    editor = null;
+    ag = null;
+    panelCambios = null;
+    comentarios = null;
+    base = null;
+    cerrada = false;
+    soloLectura = true;
+    sinControl = false;
+    panel.replaceChildren(avisosEstructura);
+    areaBarra.replaceChildren();
+    areaEditor.replaceChildren();
+    for (const caja of [avisosEstructura, avisoEtapa, errorGuardado, errorCalculo, avisoBorrador, avisoPestana, errorCarga]) {
+      caja.hidden = true;
+    }
+  }
+
+  /** Se recibió el control: todo se vuelve a leer del servidor antes de editar. */
+  async function reiniciar(): Promise<void> {
+    limpiar();
+    listo = cargar(capituloActual).catch((e) => {
+      if (vigente) mostrarErrorCarga(mensajeCarga(e));
+    });
+    await listo;
+  }
+
+  function mostrarErrorCarga(m: string): void {
+    errorCarga.textContent = `No se pudo abrir el capítulo: ${m}`;
+    errorCarga.hidden = false;
+  }
+
   /* ---------- Carga ---------- */
 
   let versionActual = 0;
 
   async function cargar(capituloId: number): Promise<void> {
+    capituloActual = capituloId;
+    cargando = true;
+    try {
+      await cargarCapitulo(capituloId);
+    } finally {
+      cargando = false;
+    }
+    // El control pudo cambiar mientras se cargaba.
+    if (vigente && candado && !cerrada) revisarControl(candado.propio());
+  }
+
+  async function cargarCapitulo(capituloId: number): Promise<void> {
     const [b, copia, consulta] = await Promise.all([
       api.get<Base>(`/capitulos/${capituloId}/base`),
       api.get<Copia>(`/capitulos/${capituloId}/copia`),
@@ -335,6 +503,24 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       avisoEtapa.hidden = false;
     }
 
+    // Un solo escritor por usuario y capítulo: sin el candado, solo lectura.
+    sinControl = false;
+    if (!soloLectura) {
+      if (!candado) {
+        const c = await abrirCandado(claveCandado(u.id, capituloId), { locks: deps.locks, almacen });
+        if (!vigente) {
+          c.liberar();
+          return;
+        }
+        candado = c;
+        candado.alCambiar(alCambiarControl);
+      }
+      if (!candado.propio()) {
+        soloLectura = true;
+        sinControl = true;
+      }
+    }
+
     if (!enConsulta) {
       // Fuera de la consulta los borradores de motivos y comentarios ya no se pueden enviar.
       const caja = cajaBorradoresSinEnviar(almacen, u.id, capituloId, b.versionId);
@@ -352,7 +538,7 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
         resaltar: (id) => resaltar(areaEditor, id),
         pedirGuardado,
         alEtapaCerrada,
-        usarBorrador: enConsulta,
+        usarBorrador: enConsulta && !sinControl,
       });
       panel.append(panelCambios.elemento);
     }
@@ -362,6 +548,7 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       api,
       capituloId,
       usuarioId: u.id,
+      versionId: b.versionId,
       almacen,
       editor: () => editor,
       alCambiar: () => {
@@ -369,12 +556,13 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       },
       alEtapaCerrada,
       mostrarLista: consulta.etapa !== 'edicion_final',
-      usarBorrador: enConsulta,
+      usarBorrador: enConsulta && !sinControl,
     });
     panel.append(comentarios.elemento);
 
     const clave = claveBorrador(u.id, capituloId, b.versionId);
-    let borrador = leerBorrador(almacen, clave);
+    // Sin control, el borrador es de la otra pestaña: no se toca.
+    let borrador = sinControl ? null : leerBorrador(almacen, clave);
     if (borrador && jsonEstable(borrador.docJson) === jsonEstable(servidorDoc)) {
       borrarBorrador(almacen, clave); // ya está en el servidor
       borrador = null;
@@ -406,6 +594,7 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
         autor,
         almacen,
         actualizado,
+        verificarTrasMs: VERIFICAR_TRAS_MS,
         ...(panelCambios
           ? { motivoDe: panelCambios.motivoDe, alConfirmar: panelCambios.alConfirmarCopia }
           : {}),
@@ -415,7 +604,8 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       ag.alCambiarEstado(alCambiarEstado);
     }
     pintarIndicador(ag?.estado() ?? { estado: 'guardado', mensaje: '' });
-    if (soloLectura) estado.textContent = 'Solo lectura';
+    if (soloLectura) estado.textContent = sinControl ? SOLO_LECTURA_PESTANA : 'Solo lectura';
+    pintarAvisoPestana(false);
     intervalo = setInterval(() => {
       if (ag?.estado().estado === 'guardado') pintarIndicador(ag.estado());
     }, 1000);
@@ -467,8 +657,6 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
     },
     editor: () => editor,
     montar(raiz) {
-      const errorCarga = el('div', { class: 'error', role: 'alert' });
-      errorCarga.hidden = true;
       raiz.replaceChildren(
         el(
           'div',
@@ -481,6 +669,7 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
             estado,
           ),
           errorCarga,
+          avisoPestana,
           avisoEtapa,
           errorGuardado,
           errorCalculo,
@@ -493,21 +682,17 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
           ),
         ),
       );
-      const mostrarError = (m: string) => {
-        errorCarga.textContent = `No se pudo abrir el capítulo: ${m}`;
-        errorCarga.hidden = false;
-      };
       if (!tieneRol(u, 'laboratorio')) {
-        mostrarError('esta vista es para cuentas de laboratorio.');
+        mostrarErrorCarga('esta vista es para cuentas de laboratorio.');
         return;
       }
       if (!/^[1-9]\d*$/.test(idTexto)) {
-        mostrarError('el identificador no es válido.');
+        mostrarErrorCarga('el identificador no es válido.');
         return;
       }
       window.addEventListener('beforeunload', alSalirPagina);
       listo = cargar(Number(idTexto)).catch((e) => {
-        if (vigente) mostrarError(mensajeCarga(e));
+        if (vigente) mostrarErrorCarga(mensajeCarga(e));
       });
     },
     async desmontar() {
@@ -518,6 +703,10 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       vaciarEspera();
       if (temporizador !== null) clearTimeout(temporizador);
       if (ag) await ag.detener();
+      // Al final: otra vista del mismo capítulo (en esta u otra pestaña) recibe el control
+      // recién cuando el último envío terminó, y carga lo que este dejó en el servidor.
+      candado?.liberar();
+      candado = null;
       barra?.destruir();
       editor?.destroy();
       editor = null;

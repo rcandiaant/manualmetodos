@@ -208,4 +208,60 @@ describe('versión final del revisor', () => {
     expect(aviso.hidden).toBe(true);
     expect(confirmar).not.toHaveBeenCalled();
   });
+
+  describe('borrador local de la versión final', () => {
+    const CLAVE_40 = 'mm:revisor:final:40:3:7';
+    const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    it('la clave lleva el usuario y la version base: otro revisor del mismo navegador no lo ve', async () => {
+      const { raiz } = await montarVista({ usuarioId: 40 });
+      botonCon(raiz, 'Componer versión final')!.click();
+      await esperar();
+      editorFinal(raiz).chain().focus('end').insertContent(' De Ana.').run();
+      desmontarTodas();
+      expect(localStorage.getItem(CLAVE_40)).toContain('De Ana.');
+      expect(localStorage.getItem('mm:revisor:final:3')).toBeNull();
+      const otro = await montarVista({ usuarioId: 41 });
+      expect(otro.raiz.querySelector<HTMLElement>('.borrador-final')!.hidden).toBe(true);
+      desmontarTodas();
+      const mismo = await montarVista({ usuarioId: 40 });
+      expect(mismo.raiz.querySelector<HTMLElement>('.borrador-final')!.hidden).toBe(false);
+    });
+
+    it('componer con un borrador local sin recuperar pide confirmacion y no lo pisa en silencio', async () => {
+      localStorage.setItem(
+        CLAVE_40,
+        JSON.stringify({ docJson: doc(parrafo('p1', 'Borrador anterior.')), fecha: '2026-11-20T12:00:00Z' }),
+      );
+      const { raiz } = await montarVista({ usuarioId: 40 });
+      botonCon(raiz, 'Componer versión final')!.click();
+      await esperar();
+      const confirmacion = raiz.querySelector<HTMLElement>('.confirmacion-final')!;
+      expect(confirmacion.hidden).toBe(false);
+      expect(confirmacion.textContent).toContain('borrador local');
+      expect(textoFinal(raiz)).toBeNull(); // no se abrió nada todavía
+      botonCon(confirmacion, 'Cancelar')!.click();
+      expect(localStorage.getItem(CLAVE_40)).toContain('Borrador anterior.');
+      botonCon(raiz, 'Componer versión final')!.click();
+      botonCon(confirmacion, 'Descartar el borrador local y componer')!.click();
+      await esperar();
+      expect(textoFinal(raiz)).not.toBeNull();
+      expect(localStorage.getItem(CLAVE_40)).toBeNull();
+      expect(raiz.querySelector<HTMLElement>('.borrador-final')!.hidden).toBe(true);
+    });
+
+    it('el borrador se escribe como mucho cada 500 ms y se vacia al salir de la pagina', async () => {
+      const { raiz } = await montarVista({ usuarioId: 40 });
+      botonCon(raiz, 'Componer versión final')!.click();
+      await esperar();
+      const ed = editorFinal(raiz);
+      for (const t of ['a', 'b', 'c', 'd', 'e']) ed.commands.insertContentAt(ed.state.doc.content.size - 1, t);
+      expect(localStorage.getItem(CLAVE_40)).toBeNull(); // nada serializado en cada tecla
+      await pausa(600);
+      expect(localStorage.getItem(CLAVE_40)).toContain('abcde');
+      ed.commands.insertContentAt(ed.state.doc.content.size - 1, 'Z');
+      salirDeLaPagina(); // beforeunload escribe ya lo pendiente
+      expect(localStorage.getItem(CLAVE_40)).toContain('abcdeZ');
+    });
+  });
 });

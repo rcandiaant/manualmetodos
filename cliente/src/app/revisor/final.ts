@@ -9,9 +9,11 @@
  *   documento tiene caracteres sin forma LaTeX o referencias colgantes; el aviso se
  *   oculta si cambian las decisiones (comportamiento de la Fase 1A).
  * Los errores se muestran con role=alert y nunca se tragan.
+ * Borrador local (`mm:revisor:final:<usuarioId>:<capituloId>:<versionId>`): se escribe como
+ * mucho cada 500 ms mientras se edita y se vacía al salir de la página o de la vista. Si hay
+ * uno sin recuperar, «Componer» y «Retomar» piden confirmación antes de descartarlo.
  */
 import { Editor } from '@tiptap/core';
-import { aplicarSugerencias, completarGrupo } from '../../cambios/aplicar';
 import { extensionesDemo } from '../../editor/editor';
 import { boton, el, mensajeDe, NOMBRE_TIPO } from '../../editor/ui';
 import { validarDocumento } from '../../esquema/esquema';
@@ -20,7 +22,8 @@ import { caracteresNoSoportados, referenciasColgantes } from '../../latex/revisi
 import type { DocJSON } from '../../tipos';
 import { ErrorApi, SIN_CONEXION, type Api } from '../api';
 import type { Etapa, Final, FinalEntrada, SugerenciaServidor } from '../tipos-api';
-import { labDe, representantes } from './panel';
+import { componerFinal, sugerenciasVigentes } from './componer';
+import { labDe } from './panel';
 
 export interface OpcionesFinal {
   api: Api;
@@ -32,7 +35,15 @@ export interface OpcionesFinal {
   sugerencias: SugerenciaServidor[];
   /** Nombre del archivo exportado (`slug.tex`). */
   nombreArchivo: string;
+  /** Revisor de la sesión (para la clave del borrador local). */
+  usuarioId?: number;
 }
+
+export const claveBorradorFinal = (usuarioId: number | string, capituloId: number, versionId: number) =>
+  `mm:revisor:final:${usuarioId}:${capituloId}:${versionId}`;
+
+/** Cada cuánto, como mucho, se serializa la versión final al borrador local. */
+const ESPERA_BORRADOR_MS = 500;
 
 export interface PanelFinal {
   /** Las decisiones cambiaron: el aviso de exportación ya no vale. */
@@ -103,7 +114,7 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
    * almacenamiento no está disponible, se sigue sin borrador (el aviso de beforeunload
    * sigue funcionando).
    */
-  const claveBorrador = `mm:revisor:final:${op.capituloId}`;
+  const claveBorrador = claveBorradorFinal(op.usuarioId ?? 'sin-usuario', op.capituloId, op.versionId);
   const guardarBorrador = (docJson: DocJSON) => {
     try {
       localStorage.setItem(claveBorrador, JSON.stringify({ docJson, fecha: new Date().toISOString() }));
@@ -118,6 +129,28 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
       // sin almacenamiento local
     }
   };
+  let temporizadorBorrador: ReturnType<typeof setTimeout> | null = null;
+  /** Programa una escritura (como mucho una cada 500 ms: no se serializa en cada tecla). */
+  const programarBorrador = () => {
+    if (temporizadorBorrador !== null) return;
+    temporizadorBorrador = setTimeout(() => {
+      temporizadorBorrador = null;
+      if (editor && editado) guardarBorrador(editor.getJSON() as DocJSON);
+    }, ESPERA_BORRADOR_MS);
+  };
+  /** Escribe ya lo que esperaba (al salir de la página o de la vista). */
+  const vaciarBorrador = () => {
+    if (temporizadorBorrador === null) return;
+    clearTimeout(temporizadorBorrador);
+    temporizadorBorrador = null;
+    if (editor && editado) guardarBorrador(editor.getJSON() as DocJSON);
+  };
+  const cancelarBorrador = () => {
+    if (temporizadorBorrador !== null) clearTimeout(temporizadorBorrador);
+    temporizadorBorrador = null;
+  };
+  /** Hay un borrador de antes que aún no se recupera ni se descarta: no se pisa sin preguntar. */
+  let borradorPendiente = false;
   const leerBorrador = (): { docJson: DocJSON; fecha: string } | null => {
     try {
       const d = JSON.parse(localStorage.getItem(claveBorrador) ?? 'null') as { docJson?: unknown; fecha?: unknown } | null;
@@ -154,26 +187,43 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
     bExportar.disabled = editor === null;
   }
 
-  /** Abrir otra versión descarta las ediciones directas no guardadas: se confirma en la página. */
-  function pedirConfirmacion(que: 'componer' | 'retomar', accion: () => void): void {
-    if (!editor || !editado) {
+  /**
+   * Abrir otra versión descarta las ediciones directas no guardadas, o el borrador local de
+   * antes si aún no se recuperó: se confirma en la página. `deBorrador`: la acción es
+   * recuperar ese mismo borrador.
+   */
+  function pedirConfirmacion(que: 'componer' | 'retomar', accion: () => void, deBorrador = false): void {
+    const pisaEdiciones = editor !== null && editado;
+    const pisaBorrador = borradorPendiente && !deBorrador;
+    if (!pisaEdiciones && !pisaBorrador) {
       accion();
       return;
     }
+    const texto = pisaEdiciones
+      ? que === 'componer'
+        ? 'Volver a componer descarta las ediciones de la versión final que no guardó.'
+        : 'Retomar la versión guardada descarta las ediciones de la versión final que no guardó.'
+      : que === 'componer'
+        ? 'Hay un borrador local de la versión final que no recuperó. Componer lo descarta.'
+        : 'Hay un borrador local de la versión final que no recuperó. Retomar la versión guardada lo descarta.';
+    const etiqueta = pisaEdiciones
+      ? 'Descartar mis ediciones y continuar'
+      : que === 'componer'
+        ? 'Descartar el borrador local y componer'
+        : 'Descartar el borrador local y continuar';
     confirmacion.replaceChildren(
-      el(
-        'p',
-        {},
-        que === 'componer'
-          ? 'Volver a componer descarta las ediciones de la versión final que no guardó.'
-          : 'Retomar la versión guardada descarta las ediciones de la versión final que no guardó.',
-      ),
+      el('p', {}, texto),
       el(
         'div',
         { class: 'botones' },
-        boton('Descartar mis ediciones y continuar', () => {
+        boton(etiqueta, () => {
           confirmacion.hidden = true;
+          cancelarBorrador();
           borrarBorrador();
+          if (pisaBorrador) {
+            borradorPendiente = false;
+            borrador.hidden = true;
+          }
           accion();
         }),
         boton('Cancelar', () => (confirmacion.hidden = true), 'secundario'),
@@ -192,7 +242,7 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
     editor.on('update', () => {
       editado = true;
       aviso.hidden = true;
-      if (editor) guardarBorrador(editor.getJSON() as DocJSON);
+      programarBorrador();
     });
     aviso.hidden = true;
     desactualizada.hidden = true;
@@ -210,23 +260,13 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
   }
 
   function componer(): void {
-    const vigentes = op.sugerencias.filter((s) => s.versionId === undefined || s.versionId === op.versionId);
-    const aceptadas = vigentes.filter((s) => s.estado === 'aceptada');
-    const anteriores = op.sugerencias.filter((s) => s.estado === 'aceptada' && !vigentes.includes(s)).length;
+    const vigentes = sugerenciasVigentes(op.sugerencias, op.versionId);
     try {
-      // Un bloque movido va entero: si un miembro quedó sin aceptar, completarGrupo lanza.
-      const completas = completarGrupo(aceptadas, vigentes, vigentes.filter((s) => s.estado !== 'aceptada'));
-      // Una propuesta idéntica de varios laboratorios se aplica una sola vez: dos idénticas
-      // de autores distintos chocan en detectarConflictos. Queda un representante por fila
-      // colapsada, con su bloque movido entero.
-      const conjunto = completarGrupo(representantes(completas as SugerenciaServidor[]).sugs, vigentes);
-      const doc = aplicarSugerencias(op.base, conjunto);
-      const v = validarDocumento(doc);
-      if (!v.ok) throw new Error(`el documento resultante no cumple el esquema: ${v.error}`);
+      const { doc, aceptadas, anteriores } = componerFinal(op.base, op.sugerencias, op.versionId);
       mostrarError(null);
       abrirEditor(
         doc,
-        `Versión compuesta con ${aceptadas.length === 1 ? '1 sugerencia aceptada' : `${aceptadas.length} sugerencias aceptadas`}. ` +
+        `Versión compuesta con ${aceptadas === 1 ? '1 sugerencia aceptada' : `${aceptadas} sugerencias aceptadas`}. ` +
           'Puede redactar su propia versión o editar directamente antes de guardarla.' +
           (anteriores > 0 ? ` ${anteriores} aceptada(s) sobre una versión base anterior no se aplican.` : ''),
       );
@@ -247,6 +287,7 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
       const r = await op.api.put<{ versionId: number }>(`/capitulos/${op.capituloId}/final`, cuerpo);
       if (!vigente) return;
       editado = false;
+      cancelarBorrador();
       borrarBorrador();
       mostrarError(null);
       estado.textContent = `Versión final guardada (v${r.versionId}).`;
@@ -327,21 +368,28 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
   // Borrador local de una sesión anterior (se salió de la vista o de la página sin guardar).
   const previo = leerBorrador();
   if (previo) {
+    borradorPendiente = true;
     const cuando = new Date(previo.fecha).toLocaleString('es-CL', { timeZone: 'America/Santiago', dateStyle: 'short', timeStyle: 'short' });
     borrador.replaceChildren(
       el('span', {}, `Hay un borrador local de la versión final que no se guardó en el servidor (${cuando}). `),
       boton('Recuperar el borrador local', () =>
-        pedirConfirmacion('retomar', () => {
-          abrirEditor(previo.docJson, 'Borrador local recuperado: aún no está guardado en el servidor.');
-          editado = true;
-          borrador.hidden = true;
-        }),
+        pedirConfirmacion(
+          'retomar',
+          () => {
+            abrirEditor(previo.docJson, 'Borrador local recuperado: aún no está guardado en el servidor.');
+            editado = true;
+            borradorPendiente = false;
+            borrador.hidden = true;
+          },
+          true,
+        ),
       ),
       ' ',
       boton(
         'Descartar el borrador',
         () => {
           borrarBorrador();
+          borradorPendiente = false;
           borrador.hidden = true;
         },
         'secundario',
@@ -352,6 +400,7 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
 
   /** Ediciones sin guardar: el navegador pregunta antes de cerrar o recargar la página. */
   const alSalir = (ev: BeforeUnloadEvent) => {
+    vaciarBorrador();
     if (!editor || !editado) return;
     ev.preventDefault();
     ev.returnValue = '';
@@ -386,6 +435,7 @@ export function montarFinal(contenedor: HTMLElement, op: OpcionesFinal): PanelFi
     },
     destruir() {
       // Las ediciones sin guardar ya están en el borrador local: se ofrecen al volver.
+      vaciarBorrador();
       vigente = false;
       window.removeEventListener('beforeunload', alSalir);
       editor?.destroy();

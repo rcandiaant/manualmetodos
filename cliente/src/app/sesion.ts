@@ -3,7 +3,8 @@
  *
  * El usuario y el `csrf` viven solo en memoria. Al recargar, `iniciar` los recupera con
  * `GET /sesion`. Si cualquier petición recibe 401 `sin_sesion`, `manejarSinSesion` lleva
- * al login recordando la ruta pedida para volver a ella tras entrar.
+ * al login recordando la ruta pedida para volver a ella tras entrar. La ruta queda atada a
+ * quien tenía la sesión: si entra otra persona en el mismo equipo, va al inicio.
  */
 import { el } from '../editor/ui';
 import { ErrorApi, SIN_CONEXION, type Api } from './api';
@@ -13,7 +14,8 @@ import type { Rol, Sesion, Usuario } from './tipos-api';
 export const RUTA_LOGIN = '#/entrar';
 
 let usuario: Usuario | null = null;
-let rutaPendiente: string | null = null;
+/** Ruta pedida antes de caer en el login y quién tenía la sesión (null: nadie, p. ej. un enlace directo). */
+let rutaPendiente: { hash: string; usuarioId: number | null } | null = null;
 
 export const usuarioActual = (): Usuario | null => usuario;
 
@@ -59,19 +61,25 @@ export async function salir(api: Api): Promise<void> {
   }
 }
 
-/** Ruta que se pidió antes de caer en el login (se consume al leerla). */
-export function tomarRutaPendiente(): string | null {
+/**
+ * Ruta que se pidió antes de caer en el login (se consume al leerla). Con `usuarioId`, se
+ * descarta si la sesión vencida era de otra persona.
+ */
+export function tomarRutaPendiente(usuarioId?: number): string | null {
   const r = rutaPendiente;
   rutaPendiente = null;
-  return r;
+  if (!r) return null;
+  if (usuarioId !== undefined && r.usuarioId !== null && r.usuarioId !== usuarioId) return null;
+  return r.hash;
 }
 
 /** Para `crearApi({alSinSesion})`: olvida al usuario, recuerda la ruta y va al login. */
 export function manejarSinSesion(navegar: (hash: string) => unknown): () => void {
   return () => {
+    const previo = usuario?.id ?? rutaPendiente?.usuarioId ?? null;
     usuario = null;
     const hash = location.hash;
-    if (hash !== RUTA_LOGIN && hash !== '' && hash !== '#') rutaPendiente = hash;
+    if (hash !== RUTA_LOGIN && hash !== '' && hash !== '#') rutaPendiente = { hash, usuarioId: previo };
     void navegar(RUTA_LOGIN);
   };
 }
@@ -148,7 +156,7 @@ export function vistaLogin(api: Api, deps: DepsLogin): Vista {
         enviar.disabled = true;
         caja.hidden = true;
         void entrar(api, correo.value.trim(), clave.value)
-          .then(() => deps.navegar(tomarRutaPendiente() ?? RUTA_INICIO))
+          .then((u) => deps.navegar(tomarRutaPendiente(u.id) ?? RUTA_INICIO))
           .catch((e: unknown) => {
             clave.value = '';
             caja.textContent = mensajeLogin(e);

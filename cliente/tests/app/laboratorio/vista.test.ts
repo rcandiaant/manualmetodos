@@ -3,7 +3,8 @@ import { NodeSelection } from '@tiptap/pm/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { crearApi } from '../../../src/app/api';
 import { claveBorrador } from '../../../src/app/laboratorio/autoguardado';
-import { vistaCapitulo } from '../../../src/app/laboratorio/vista';
+import { vistaCapitulo, type DepsCapitulo } from '../../../src/app/laboratorio/vista';
+import { crearLocksFalsos } from './candados-falsos';
 import type { Base, Consulta, Copia, Usuario } from '../../../src/app/tipos-api';
 import { crearBarra } from '../../../src/editor/barra';
 import { extensionesDemo } from '../../../src/editor/editor';
@@ -29,11 +30,14 @@ interface Escenario {
   etapa?: Consulta['etapa'];
   /** Respuestas de PUT …/copia, en orden (por defecto 200). */
   puts?: (() => Response | Promise<Response>)[];
+  /** Servidor compartido entre vistas: el PUT actualiza la copia que devuelve el GET. */
+  servidor?: { copia: Copia; reloj: number };
 }
 
 const vistas: { desmontar(): void | Promise<void> }[] = [];
 
-function montar(esc: Escenario = {}) {
+function montar(esc: Escenario = {}, deps: DepsCapitulo = {}) {
+  let getsCopia = 0;
   const puts: { url: string; cuerpo: { versionId: number; docJson: DocJSON; sugerencias: unknown[] } }[] = [];
   const respuestasPut = [...(esc.puts ?? [])];
   const fetchRuta = (async (entrada: RequestInfo | URL, init: RequestInit = {}) => {
@@ -42,13 +46,22 @@ function montar(esc: Escenario = {}) {
     if (metodo === 'GET' && url === '/api/capitulos/3/base') {
       return json(200, { versionId: 7, docJson: esc.base ?? BASE_DOC } satisfies Base, { ETag: '"v7"' });
     }
-    if (metodo === 'GET' && url === '/api/capitulos/3/copia') return json(200, esc.copia ?? { docJson: null });
+    if (metodo === 'GET' && url === '/api/capitulos/3/copia') {
+      getsCopia++;
+      return json(200, esc.servidor?.copia ?? esc.copia ?? { docJson: null });
+    }
     if (metodo === 'GET' && url === '/api/consulta') return json(200, consulta(esc.etapa));
     if (metodo === 'GET' && url === '/api/capitulos/3/comentarios') return json(200, []);
     if (metodo === 'GET' && url === '/api/capitulos/3/mis-aportes') return json(200, { sugerencias: [], comentarios: [] });
     if (metodo === 'PUT' && url === '/api/capitulos/3/copia') {
       puts.push({ url, cuerpo: JSON.parse(String(init.body)) });
       const r = respuestasPut.shift();
+      if (esc.servidor) {
+        const cuerpo = JSON.parse(String(init.body)) as { docJson: DocJSON };
+        const actualizado = new Date(Date.parse('2026-11-03T15:20:00Z') + 1000 * esc.servidor.reloj++).toISOString().replace('.000', '');
+        esc.servidor.copia = { docJson: cuerpo.docJson, actualizado, versionId: 7, sugerencias: [] };
+        return json(200, { actualizado });
+      }
       return r ? r() : json(200, { actualizado: '2026-11-03T15:20:00Z' });
     }
     throw new Error(`ruta inesperada ${metodo} ${url}`);
@@ -56,10 +69,10 @@ function montar(esc: Escenario = {}) {
   const api = crearApi({ fetch: fetchRuta, alSinSesion: () => {} });
   const raiz = document.createElement('div');
   document.body.append(raiz);
-  const vista = vistaCapitulo(api, ANA, '3', { almacen: localStorage });
+  const vista = vistaCapitulo(api, ANA, '3', { almacen: localStorage, ...deps });
   vista.montar(raiz);
   vistas.push(vista);
-  return { vista, raiz, puts };
+  return { vista, raiz, puts, getsCopia: () => getsCopia };
 }
 
 const botonTexto = (raiz: HTMLElement, t: string) =>
@@ -279,6 +292,103 @@ describe('vista del capítulo (laboratorio)', () => {
     // El texto de alrededor sí se edita.
     escribir(ed, 'Q');
     expect(ed.getText()).toContain('Q');
+  });
+});
+
+describe('un solo escritor por usuario y capitulo (I1)', () => {
+  const aviso = (raiz: HTMLElement) => raiz.querySelector('.aviso-pestana') as HTMLElement;
+
+  it('dos vistas del mismo capitulo: la segunda queda en solo lectura y edita sola al cerrarse la primera', async () => {
+    const locks = crearLocksFalsos();
+    const servidor = { copia: { docJson: null } as Copia, reloj: 0 };
+    const a = montar({ servidor }, { locks });
+    await a.vista.listo;
+    const b = montar({ servidor }, { locks });
+    await b.vista.listo;
+    expect(a.vista.editor()!.isEditable).toBe(true);
+    expect(b.vista.editor()!.isEditable).toBe(false);
+    expect(aviso(b.raiz).hidden).toBe(false);
+    expect(aviso(b.raiz).textContent).toContain('Este capítulo está abierto en otra pestaña');
+    expect(b.raiz.querySelector('.estado-guardado')?.textContent).toContain('Solo lectura');
+    expect(botonTexto(b.raiz, 'Tomar el control')).toBeDefined();
+    expect(aviso(a.raiz).hidden).toBe(true);
+    // A edita y sale del capítulo: su último envío termina antes de soltar el control.
+    escribir(a.vista.editor()!, 'A1');
+    const gets = b.getsCopia();
+    await a.vista.desmontar();
+    vistas.splice(vistas.indexOf(a.vista), 1);
+    expect(a.puts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(0);
+    await b.vista.listo;
+    // B vuelve a leer la copia del servidor antes de habilitar la edición.
+    expect(b.getsCopia()).toBe(gets + 1);
+    expect(b.vista.editor()!.isEditable).toBe(true);
+    expect(b.vista.editor()!.getText()).toContain('A1'); // lo que A dejó en el servidor
+    expect(aviso(b.raiz).hidden).toBe(true);
+    escribir(b.vista.editor()!, 'B1');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(b.puts).toHaveLength(1);
+    expect(JSON.stringify(b.puts[0].cuerpo.docJson)).toContain('B1A1');
+  });
+
+  it('tomar el control deja a la primera en solo lectura, sin enviar mas, y le ofrece copiar lo no guardado', async () => {
+    const locks = crearLocksFalsos();
+    const a = montar({}, { locks });
+    await a.vista.listo;
+    const b = montar({}, { locks });
+    await b.vista.listo;
+    escribir(a.vista.editor()!, 'Perdible');
+    await vi.advanceTimersByTimeAsync(500); // pasó el recálculo, aún no el envío
+    botonTexto(b.raiz, 'Tomar el control')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    await b.vista.listo;
+    expect(b.vista.editor()!.isEditable).toBe(true);
+    expect(a.vista.editor()!.isEditable).toBe(false);
+    expect(aviso(a.raiz).textContent).toContain('Otra pestaña o ventana tomó el control');
+    const area = a.raiz.querySelector('.aviso-pestana textarea.borrador-texto') as HTMLTextAreaElement;
+    expect(area.value).toContain('Perdible');
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(a.puts).toHaveLength(0);
+    // Al cerrarse B, A recupera el control y carga de nuevo; la caja para copiar sigue ahí.
+    await b.vista.desmontar();
+    vistas.splice(vistas.indexOf(b.vista), 1);
+    await vi.advanceTimersByTimeAsync(0);
+    await a.vista.listo;
+    expect(a.vista.editor()!.isEditable).toBe(true);
+    expect((a.raiz.querySelector('.aviso-pestana textarea.borrador-texto') as HTMLTextAreaElement).value).toContain('Perdible');
+    botonTexto(a.raiz, 'Descartarlos')!.click();
+    expect(aviso(a.raiz).hidden).toBe(true);
+  });
+
+  it('el guardado confirmado de una pestaña no borra el borrador de otra', async () => {
+    let soltar!: (r: Response) => void;
+    const { vista, puts } = montar({ puts: [() => new Promise<Response>((r) => (soltar = r))] });
+    await vista.listo;
+    escribir(vista.editor()!, 'X');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(puts).toHaveLength(1); // en curso; su borrador ya se escribió
+    const ajeno = JSON.stringify({ docJson: BASE_DOC, guardadoLocal: 'otra', actualizadoServidor: null });
+    localStorage.setItem(CLAVE, ajeno);
+    soltar(json(200, { actualizado: '2026-11-03T15:20:00Z' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vista.editor()!.isEditable).toBe(true);
+    expect(localStorage.getItem(CLAVE)).toBe(ajeno);
+  });
+
+  it('copia cambiada desde otra pestaña: no se envia, solo lectura y se ofrece copiar lo no guardado', async () => {
+    const { vista, raiz, puts } = montar({
+      copia: { docJson: BASE_DOC, actualizado: '2026-11-03T15:00:00Z', versionId: 7, sugerencias: [] },
+    });
+    await vista.listo;
+    localStorage.setItem('mm:confirmado:12:3:7', '2026-11-03T15:30:00Z'); // otra pestaña guardó después
+    escribir(vista.editor()!, 'Mio');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(puts).toHaveLength(0);
+    expect(vista.editor()!.isEditable).toBe(false);
+    const alerta = raiz.querySelector('[role="alert"].error-guardado') as HTMLElement;
+    expect(alerta.textContent).toContain('cambió en el servidor desde otra pestaña');
+    expect((raiz.querySelector('textarea.borrador-texto') as HTMLTextAreaElement).value).toContain('Mio');
+    expect(localStorage.getItem(CLAVE)).not.toBeNull();
   });
 });
 
