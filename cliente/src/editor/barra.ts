@@ -9,7 +9,10 @@
  * - Símbolos (° ± ≤ ≥ µ · × →).
  * - "Referenciar ítem": lista los ítems con `etiqueta` del capítulo e inserta un nodo `referencia`.
  *
- * "Fórmula" (Task 4) y "Comentar" (Task 5) se agregan después con `agregar`.
+ * - Fórmulas (Task 4): "Fórmula" (en línea) y "Ecuación" (en bloque) abren el diálogo de
+ *   `formulas.ts`; clic en una fórmula existente la edita. Nada de esto ocurre en solo lectura.
+ *
+ * "Comentar" (Task 5) se agrega después con `agregar`.
  * Los bloques creados aquí llevan `bid: null` (R27): son bloques nuevos.
  */
 import { Editor, Extension, Node, type Extensions } from '@tiptap/core';
@@ -20,6 +23,7 @@ import { extensionesManual } from '../esquema/extensiones';
 import type { DocJSON } from '../tipos';
 import { textoVisible } from './decoraciones';
 import { alPulsarEnter, BloquesNuevos } from './editor';
+import { abrirEditorFormula, editarFormula, formulaEnDOM } from './formulas';
 import { boton, el } from './ui';
 
 export const SIMBOLOS = ['°', '±', '≤', '≥', 'µ', '·', '×', '→'] as const;
@@ -425,8 +429,52 @@ export function crearBarra(ed: Editor): Barra {
     }),
   );
 
-  // Clic en una nota existente: se abre en el panel.
+  // Fórmulas: un diálogo a la vez; pasar a solo lectura o destruir la barra lo cierra (cancela).
+  let dialogoFormula: AbortController | null = null;
+  const puedeEditar = () => habilitada && ed.isEditable && !ed.isDestroyed;
+  const cerrarFormula = () => {
+    dialogoFormula?.abort();
+    dialogoFormula = null;
+  };
+  async function conDialogo(fn: (senal: AbortSignal) => Promise<unknown>): Promise<void> {
+    if (dialogoFormula || !puedeEditar()) return;
+    const control = new AbortController();
+    dialogoFormula = control;
+    try {
+      await fn(control.signal);
+    } finally {
+      if (dialogoFormula === control) dialogoFormula = null;
+    }
+  }
+  const insertarFormula = (enBloque: boolean) =>
+    conDialogo(async (senal) => {
+      const latex = await abrirEditorFormula({ latex: '', enBloque, senal });
+      if (latex === null || !puedeEditar()) return;
+      if (!enBloque) {
+        ed.chain().focus().insertContent({ type: 'matematica', attrs: { latex } }).run();
+        return;
+      }
+      const tipo = ed.schema.nodes.ecuacion;
+      const pos = posInsercionBloque(ed, tipo);
+      if (pos === null) return;
+      const tr = ed.state.tr.insert(pos, tipo.create({ latex, bid: null }));
+      tr.setSelection(NodeSelection.create(tr.doc, pos));
+      ed.view.dispatch(tr.scrollIntoView());
+      ed.view.focus();
+    });
+  grupo(
+    'Fórmulas',
+    accion('Fórmula', () => void insertarFormula(false), 'Insertar una fórmula en la línea'),
+    accion('Ecuación', () => void insertarFormula(true), 'Insertar una ecuación en bloque'),
+  );
+
+  // Clic en una nota o una fórmula existente: la nota se abre en el panel, la fórmula en el diálogo.
   const alClicEditor = (ev: MouseEvent) => {
+    const posFormula = formulaEnDOM(ed, ev.target);
+    if (posFormula !== null) {
+      void conDialogo((senal) => editarFormula(ed, posFormula, puedeEditar, senal));
+      return;
+    }
     const objetivo = (ev.target as HTMLElement | null)?.closest?.('.vista-nota');
     if (!objetivo) return;
     const pos = ed.view.posAtDOM(objetivo, 0);
@@ -455,7 +503,10 @@ export function crearBarra(ed: Editor): Barra {
     habilitar(si) {
       habilitada = si;
       for (const b of botones) b.disabled = !si;
-      if (!si) cerrarRefs();
+      if (!si) {
+        cerrarRefs();
+        cerrarFormula();
+      }
       mini?.setEditable(si);
     },
     actualizar,
@@ -465,6 +516,7 @@ export function crearBarra(ed: Editor): Barra {
       ed.view.dom.removeEventListener('click', alClicEditor);
       cerrarRefs();
       cerrarNota();
+      cerrarFormula();
     },
   };
 }
