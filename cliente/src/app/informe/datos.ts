@@ -19,15 +19,26 @@ import type { Comentario, SugerenciaServidor } from '../tipos-api';
 
 export type TipoAporte = 'sugerencia' | 'comentario';
 
+/** Tipo de cambio de una sugerencia (los comentarios no tienen). */
+export type CambioInforme = 'contenido' | 'formato' | 'insertado' | 'eliminado' | 'movido-origen' | 'movido-destino';
+
 export interface FilaInforme {
   capituloId: number;
   capitulo: string;
   tipo: TipoAporte;
   /** «3. Reactivos › ítem 2» o «Bloque no encontrado en la versión vigente». */
   ubicacion: string;
-  /** Texto plano. En un comentario: original = texto anclado, propuesta = texto del comentario. */
+  /**
+   * Texto plano. En un comentario: original = texto anclado, propuesta = texto del comentario.
+   * En una sugerencia que no es de contenido, `propuesta` lleva delante `[etiquetaCambio]`
+   * (así sale en el CSV); la vista usa `cambio`/`etiquetaCambio` y `propuestaSinEtiqueta`.
+   */
   original: string;
   propuesta: string;
+  /** Solo en sugerencias. */
+  cambio?: CambioInforme;
+  /** Etiqueta del cambio sin corchetes («formato: +negrita», «bloque insertado»…); '' en contenido y comentarios. */
+  etiquetaCambio: string;
   laboratorio: string;
   motivo: string;
   /** pendiente|aceptada|rechazada|modificada (sugerencia) · abierto|resuelto (comentario). */
@@ -136,21 +147,32 @@ export function cambioFormato(original: DocJSON[], propuesta: DocJSON[]): string
   return partes.length === 0 ? '[formato]' : `[formato: ${partes.join(', ')}]`;
 }
 
-/** Propuesta legible: el texto, con el tipo de cambio delante cuando no es de contenido. */
-function propuestaDe(s: SugerenciaServidor): string {
+/** Tipo de cambio, etiqueta (sin corchetes) y propuesta legible con la etiqueta delante. */
+function propuestaDe(s: SugerenciaServidor): { cambio: CambioInforme; etiqueta: string; propuesta: string } {
   const texto = textoPlano(s.propuesta ?? []);
-  const con = (etiqueta: string) => (texto === '' ? etiqueta : `${etiqueta} ${texto}`);
   const movido = typeof s.grupo === 'string' && s.grupo.startsWith('mov:');
+  const con = (cambio: CambioInforme, etiqueta: string) => ({
+    cambio,
+    etiqueta,
+    propuesta: texto === '' ? `[${etiqueta}]` : `[${etiqueta}] ${texto}`,
+  });
   switch (s.tipo) {
     case 'formato':
-      return con(cambioFormato(s.original ?? [], s.propuesta ?? []));
+      return con('formato', cambioFormato(s.original ?? [], s.propuesta ?? []).slice(1, -1));
     case 'bloque-insertado':
-      return con(movido ? '[bloque movido: lugar nuevo]' : '[bloque insertado]');
+      return movido ? con('movido-destino', 'bloque movido: lugar nuevo') : con('insertado', 'bloque insertado');
     case 'bloque-eliminado':
-      return con(movido ? '[bloque movido: lugar original]' : '[bloque eliminado]');
+      return movido ? con('movido-origen', 'bloque movido: lugar original') : con('eliminado', 'bloque eliminado');
     default:
-      return texto;
+      return { cambio: 'contenido', etiqueta: '', propuesta: texto };
   }
+}
+
+/** Propuesta sin la etiqueta `[…] ` que lleva delante (para mostrarla aparte). */
+export function propuestaSinEtiqueta(f: FilaInforme): string {
+  if (!f.etiquetaCambio) return f.propuesta;
+  const prefijo = `[${f.etiquetaCambio}]`;
+  return f.propuesta.startsWith(prefijo) ? f.propuesta.slice(prefijo.length).replace(/^ /, '') : f.propuesta;
 }
 
 interface Indice {
@@ -238,6 +260,7 @@ export function filasInforme(capitulos: CapituloInforme[], aportes: Map<number, 
     const ind = indexar(cap.base);
     const conClave: { f: FilaInforme; pos: number; i: number }[] = [];
     for (const s of ap.sugerencias) {
+      const p = propuestaDe(s);
       conClave.push({
         pos: posicionDe(ind, s.bloqueId),
         i: conClave.length,
@@ -247,7 +270,9 @@ export function filasInforme(capitulos: CapituloInforme[], aportes: Map<number, 
           tipo: 'sugerencia',
           ubicacion: ubicacionDe(ind, s.bloqueId),
           original: textoPlano(s.original ?? []),
-          propuesta: propuestaDe(s),
+          propuesta: p.propuesta,
+          cambio: p.cambio,
+          etiquetaCambio: p.etiqueta,
           laboratorio: s.laboratorio ?? '',
           motivo: s.motivo ?? '',
           estado: s.estado ?? 'pendiente',
@@ -269,6 +294,7 @@ export function filasInforme(capitulos: CapituloInforme[], aportes: Map<number, 
           ubicacion: ubicacionDe(ind, c.bloqueId),
           original: textoAnclado(ind, c),
           propuesta: c.texto,
+          etiquetaCambio: '',
           laboratorio: c.laboratorio ?? '',
           motivo: '',
           estado: c.estado,

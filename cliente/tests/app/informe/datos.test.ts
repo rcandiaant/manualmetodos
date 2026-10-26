@@ -5,6 +5,7 @@ import {
   describirFiltros,
   filasInforme,
   filtrar,
+  propuestaSinEtiqueta,
   type FilaInforme,
 } from '../../../src/app/informe/datos';
 import type { Comentario, SugerenciaServidor } from '../../../src/app/tipos-api';
@@ -187,6 +188,9 @@ describe('informe: filasInforme', () => {
     expect(por('Lab Norte').propuesta).toBe('[formato: +negrita, −cursiva] Se aplica');
     expect(por('Lab Sur').propuesta).toBe('[formato: +subíndice, −superíndice] H2$x$');
     expect(por('Lab Tres').propuesta).toBe('[formato: +negrita] Se aplica');
+    expect(por('Lab Norte').cambio).toBe('formato');
+    expect(por('Lab Norte').etiquetaCambio).toBe('formato: +negrita, −cursiva');
+    expect(propuestaSinEtiqueta(por('Lab Norte'))).toBe('Se aplica');
   });
 
   it('bloque insertado, eliminado y movido se nombran en la propuesta', () => {
@@ -203,6 +207,38 @@ describe('informe: filasInforme', () => {
       '[bloque movido: lugar nuevo] Preámbulo',
     ]);
     expect(filas[2].original).toBe('Se aplica a suelos.');
+    expect(filas.map((f) => f.cambio)).toEqual(['movido-origen', 'insertado', 'eliminado', 'movido-destino']);
+    expect(filas.map((f) => f.etiquetaCambio)).toEqual([
+      'bloque movido: lugar original',
+      'bloque insertado',
+      'bloque eliminado',
+      'bloque movido: lugar nuevo',
+    ]);
+    expect(filas.map(propuestaSinEtiqueta)).toEqual(['', 'Nuevo párrafo', '', 'Preámbulo']);
+  });
+
+  it('contenido y comentario no llevan etiqueta aunque el texto empiece con corchetes', () => {
+    const filas = filasInforme(
+      [{ id: 1, titulo: 'C', base: { type: 'doc', content: [parrafo('p1', 'Se aplica')] } }],
+      new Map([
+        [
+          1,
+          {
+            sugerencias: [sug({ bloqueId: 'p1', propuesta: [texto('[bloque eliminado] literal')] })],
+            comentarios: [
+              { id: 1, bloqueId: 'p1', rango: { desde: 0, hasta: 1 }, texto: '[formato] ojo', estado: 'abierto', creado: '2026-11-03T15:20:00Z' },
+            ],
+          },
+        ],
+      ]),
+    );
+    const s = filas.find((f) => f.tipo === 'sugerencia')!;
+    const c = filas.find((f) => f.tipo === 'comentario')!;
+    expect(s.cambio).toBe('contenido');
+    expect(s.etiquetaCambio).toBe('');
+    expect(propuestaSinEtiqueta(s)).toBe('[bloque eliminado] literal');
+    expect(c.cambio).toBeUndefined();
+    expect(propuestaSinEtiqueta(c)).toBe('[formato] ojo');
   });
 
   it('fecha ilegible se muestra tal cual sin romper el informe', () => {

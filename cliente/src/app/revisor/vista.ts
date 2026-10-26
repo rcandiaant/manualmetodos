@@ -121,7 +121,12 @@ export function vistaRevisor(
             'header',
             { class: 'cabecera-app' },
             el('div', {}, titulo, el('div', { class: 'subtitulo' }, 'Revisión de los aportes de los laboratorios')),
-            el('div', { class: 'cabecera-acciones' }, el('a', { href: '#/capitulos', class: 'enlace-boton' }, 'Volver a los capítulos')),
+            el(
+              'div',
+              { class: 'cabecera-acciones' },
+              el('a', { href: `#/informe/${capituloId}`, class: 'enlace-boton' }, 'Registro de cambios de este capítulo'),
+              el('a', { href: '#/capitulos', class: 'enlace-boton' }, 'Volver a los capítulos'),
+            ),
           ),
           errores,
           avisos,
