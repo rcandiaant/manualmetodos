@@ -13,7 +13,11 @@ export interface Vista {
 }
 
 export type Parametros = Record<string, string>;
-export type FabricaVista = (params: Parametros) => Vista;
+/**
+ * `consulta`: parámetros tras `?` en el hash (`#/revisar/3?lab=12`), vacía si no hay.
+ * Las fábricas que no la usan pueden ignorar el segundo argumento.
+ */
+export type FabricaVista = (params: Parametros, consulta: URLSearchParams) => Vista;
 
 export interface Router {
   /** Va a `hash` (cambia `location.hash`); resuelve cuando la vista nueva quedó montada. */
@@ -55,8 +59,17 @@ function casar(patrones: Patron[], hash: string): { fabrica: FabricaVista; param
   return null;
 }
 
-/** Normaliza a `#/a/b`. */
-const normalizar = (hash: string): string => `#/${partesDe(hash).join('/')}`;
+/** Texto tras el primer `?` del hash ('' si no hay). */
+const consultaDe = (hash: string): string => {
+  const i = hash.indexOf('?');
+  return i < 0 ? '' : hash.slice(i + 1);
+};
+
+/** Normaliza a `#/a/b`, conservando la consulta (`#/a/b?x=1`) si la hay. */
+const normalizar = (hash: string): string => {
+  const q = consultaDe(hash);
+  return `#/${partesDe(hash).join('/')}${q ? `?${q}` : ''}`;
+};
 
 let routerActual: Router | null = null;
 
@@ -103,7 +116,7 @@ export function definirRutas(
     raiz.replaceChildren();
     let vista: Vista | null = null;
     try {
-      vista = destino.fabrica(destino.params);
+      vista = destino.fabrica(destino.params, new URLSearchParams(consultaDe(hash)));
       vista.montar(raiz);
       actual = vista;
       hashActual = hash;
