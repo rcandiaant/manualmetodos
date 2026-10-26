@@ -11,6 +11,7 @@ use Manual\Pruebas\Soporte\AlmacenSesionMemoria;
 use Manual\Pruebas\Soporte\BaseDePruebas;
 use Manual\Pruebas\Soporte\ClienteApi;
 use Manual\Pruebas\Soporte\RelojFijo;
+use Manual\Seguridad\Claves;
 use Manual\Seguridad\LimiteIntentos;
 use PHPUnit\Framework\TestCase;
 
@@ -191,7 +192,19 @@ final class SesionTest extends TestCase
         $this->assertSame($inexistente->cabeceras, $claveMala->cabeceras);
         $this->assertNull($this->setCookie($inexistente));
         $this->assertSame([], $this->sesiones->sesiones, 'un fallo no crea sesión');
-        $this->assertGreaterThan(30, $msInexistente, 'con correo inexistente igual se verifica un hash Argon2id');
+        // Umbral relativo al costo de un hash en esta máquina (un umbral fijo fallaba en runners rápidos del CI).
+        // Mediana de 3 mediciones: una sola muestra puede salir inflada por una pausa del runner.
+        $muestras = [];
+        for ($i = 0; $i < 3; $i++) {
+            $inicio = hrtime(true);
+            Claves::verificar('cualquier-clave', Claves::hashFicticio());
+            $muestras[] = (hrtime(true) - $inicio) / 1e6;
+        }
+        sort($muestras);
+        $msUnHash = $muestras[1];
+        // Mismo algoritmo y mismos parámetros (m, t, p o costo): el ficticio no puede ser más barato que el real.
+        $this->assertSame(password_get_info(Claves::hash('x')), password_get_info(Claves::hashFicticio()));
+        $this->assertGreaterThan($msUnHash * 0.5, $msInexistente, 'con correo inexistente igual se verifica un hash Argon2id');
         $this->assertSame(200, $this->login($this->cliente('10.0.0.3'), 'existe@lab.cl', $u['clave'])->estado);
     }
 
