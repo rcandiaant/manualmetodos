@@ -8,7 +8,7 @@ import {
   decoracionesDeCambios,
   decoracionesRevisor,
   posicionEnDoc,
-} from '../src/demo/decoraciones';
+} from '../src/editor/decoraciones';
 import { extensionesManual } from '../src/esquema/extensiones';
 import type { DocJSON } from '../src/tipos';
 import { doc, parrafo, ref } from './ayudantes-doc';

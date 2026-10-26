@@ -1,7 +1,7 @@
 import { Editor } from '@tiptap/core';
 import { Slice } from '@tiptap/pm/model';
 import { afterEach, describe, expect, it } from 'vitest';
-import { correccionesBloquesNuevos, extensionesDemo, limpiarPegado } from '../src/demo/editor';
+import { correccionesBloquesNuevos, extensionesDemo, limpiarPegado } from '../src/editor/editor';
 import { esquemaManual } from '../src/esquema/esquema';
 import type { DocJSON } from '../src/tipos';
 import { doc, item, lista, parrafo } from './ayudantes-doc';

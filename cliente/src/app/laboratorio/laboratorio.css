@@ -1,0 +1,112 @@
+/* Vista del laboratorio (#/capitulo/:id). Usa las variables de editor/estilos.css. */
+
+.app-lab { max-width: 1280px; margin: 0 auto; padding: 12px 16px 32px; }
+.cabecera-lab {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--borde);
+}
+.cabecera-lab h1 { font-size: 1.25rem; margin: 0; flex: 1 1 auto; }
+.enlace-volver { color: var(--acento); font-weight: 600; text-decoration: none; }
+.enlace-volver:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+.estado-guardado { font-size: 0.85rem; color: var(--tenue); }
+.estado-guardado.estado-pendiente, .estado-guardado.estado-guardando { color: var(--lab-b); font-weight: 600; }
+.estado-guardado.estado-sin-conexion, .estado-guardado.estado-sesion-vencida,
+.estado-guardado.estado-error, .estado-guardado.estado-cerrada { color: var(--eliminado); font-weight: 700; }
+
+.app-lab > .aviso, .app-lab > .error { margin: 8px 0 0; }
+.aviso-borrador .botones, .aviso-pestana .botones { margin-top: 6px; }
+.copiar-borrador { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.borrador-texto { width: 100%; font: inherit; font-size: 0.85rem; white-space: pre-wrap; }
+
+.disposicion-lab {
+  display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 16px; align-items: start; margin-top: 12px;
+}
+@media (max-width: 900px) { .disposicion-lab { grid-template-columns: minmax(0, 1fr); } }
+.panel-lab .aviso-estructura { margin: 0 0 10px; }
+
+/* Barra */
+.barra-lab {
+  display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center;
+  position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--fondo);
+}
+.barra-grupo { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.barra-lab button { padding: 4px 8px; }
+.barra-lab button:disabled { opacity: 0.5; cursor: not-allowed; }
+.barra-lab button.simbolo { min-width: 2rem; font-family: Georgia, serif; }
+.barra-lab button.marca-subindice, .barra-lab button.marca-superindice { font-family: Georgia, serif; }
+.grupo-referencias { position: relative; }
+.lista-referencias {
+  position: absolute; top: 100%; left: 0; z-index: 3; min-width: 18rem; max-height: 18rem; overflow: auto;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.lista-referencias button { text-align: left; border-color: transparent; }
+.lista-referencias button:hover { border-color: var(--acento); }
+
+/* Panel de nota al pie */
+.panel-nota {
+  margin-top: 10px; padding: 10px; background: var(--papel);
+  border: 1px solid var(--acento); border-radius: var(--radio);
+}
+.panel-nota h2 { font-size: 0.95rem; margin: 0 0 4px; }
+.editor.editor-nota { min-height: 6rem; padding: 10px 12px; margin: 6px 0; }
+
+/* Contenido especial protegido */
+.app-lab .editor .bloque-especial {
+  font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--tenue);
+  background: #eceae5; border-radius: 4px; padding: 0 4px; white-space: pre-wrap; cursor: not-allowed;
+}
+.app-lab .editor div.bloque-especial { display: block; padding: 4px 8px; margin: 6px 0; border-left: 3px solid var(--borde); }
+.app-lab .editor .ProseMirror[contenteditable='false'] { cursor: default; }
+
+/* Panel: mis cambios, motivos, comentarios y mis aportes (Task 5) */
+.panel-lab h2 { font-size: 0.95rem; margin: 0; }
+.panel-lab h3 { font-size: 0.9rem; margin: 0 0 4px; }
+.panel-lab > section { margin-bottom: 14px; padding: 10px; background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); }
+.panel-lab .vacio, .panel-lab .nota { font-size: 0.82rem; color: var(--tenue); margin: 4px 0; }
+.panel-lab textarea { width: 100%; font: inherit; font-size: 0.85rem; resize: vertical; }
+.panel-lab textarea[readonly] { background: #f1efea; color: var(--tenue); }
+.panel-lab button:focus-visible, .panel-lab textarea:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.panel-lab button:disabled { opacity: 0.5; cursor: not-allowed; }
+.panel-lab .error { font-size: 0.82rem; margin: 4px 0; }
+.panel-lab .botones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+.mis-cambios-cabecera { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.total-cambios { font-size: 0.82rem; color: var(--tenue); }
+.contador-sin-motivo { font-size: 0.82rem; font-weight: 700; color: var(--lab-b); }
+.lista-cambios, .lista-comentarios, .lista-aportes, .lista-huerfanos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cambio-unidad { padding: 6px 8px; border-left: 3px solid var(--insertado); background: var(--fondo); border-radius: 4px; }
+.cambio-unidad.sin-motivo { border-left-color: var(--lab-b); background: var(--lab-b-fondo); }
+.ir-cambio, .ir-comentario {
+  display: block; width: 100%; text-align: left; padding: 2px 0; margin-bottom: 4px;
+  background: none; border: 0; font: inherit; font-size: 0.85rem; cursor: pointer; color: inherit;
+}
+.ir-cambio:hover .resumen, .ir-comentario:hover { text-decoration: underline; }
+.tipo-cambio { display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--tenue); }
+.etiqueta-motivo { display: block; }
+.linea-estado-motivo { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; min-height: 1em; }
+.falta-motivo { color: var(--lab-b); font-weight: 700; }
+.estado-motivo { color: var(--tenue); }
+.estado-motivo-pendiente, .estado-motivo-esperando, .estado-motivo-guardando, .estado-motivo-error { color: var(--lab-b); font-weight: 600; }
+.motivos-huerfanos { margin-top: 10px; font-size: 0.82rem; }
+.motivos-huerfanos li { display: flex; flex-direction: column; gap: 4px; }
+
+.comentario-nuevo { margin: 6px 0 10px; padding: 8px; border: 1px solid var(--acento); border-radius: var(--radio); }
+.cita-comentario { margin: 2px 0 6px; padding: 2px 8px; border-left: 3px solid #e0b100; font-size: 0.82rem; color: var(--tenue); }
+.comentario-item { padding: 6px 8px; border-left: 3px solid #e0b100; background: var(--fondo); border-radius: 4px; }
+.texto-comentario { margin: 2px 0; font-size: 0.88rem; white-space: pre-wrap; }
+.meta-comentario { margin: 2px 0; font-size: 0.75rem; color: var(--tenue); }
+.confirmar-borrado { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.85rem; }
+.confirmar-borrado p { margin: 0; font-weight: 600; }
+button.peligro { color: #fff; background: var(--eliminado); border-color: var(--eliminado); }
+.editor .comentario-ancla { background: #fff4c2; border-bottom: 2px solid #e0b100; }
+.editor .comentario-ancla-bloque { outline: 2px dashed #e0b100; outline-offset: 2px; }
+
+.aporte { padding: 6px 8px; background: var(--fondo); border-radius: 4px; font-size: 0.85rem; }
+.app-lab .estado-aporte { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 1px 6px; border-radius: 10px; background: var(--borde); }
+.app-lab .estado-aporte.estado-aceptada, .app-lab .estado-aporte.estado-resuelto { background: var(--insertado-fondo); color: var(--insertado); }
+.app-lab .estado-aporte.estado-rechazada { background: #fde8e8; color: var(--eliminado); }
+.app-lab .estado-aporte.estado-modificada { background: var(--lab-b-fondo); color: var(--lab-b); }
+.app-lab .nota-resolucion { margin: 4px 0 0; }

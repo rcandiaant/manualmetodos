@@ -63,7 +63,8 @@ export function limpiarPegado(slice: Slice): Slice {
   return new Slice(limpiarFragmento(slice.content), slice.openStart, slice.openEnd);
 }
 
-const BloquesNuevos = Extension.create({
+/** R27 como extensión (exportada para el mini-editor de notas de `barra.ts`). */
+export const BloquesNuevos = Extension.create({
   name: 'bloquesNuevos',
   addProseMirrorPlugins() {
     return [
@@ -163,7 +164,7 @@ function vistaAtomo(crear: (n: ProseMirrorNode) => HTMLElement): NodeViewRendere
 
 function katexEn(el: HTMLElement, latex: string, displayMode: boolean): HTMLElement {
   try {
-    katex.render(latex, el, { displayMode, throwOnError: false });
+    katex.render(latex, el, { displayMode, throwOnError: false, trust: false });
   } catch {
     el.textContent = latex; // KaTeX no pudo: se muestra la fuente
   }

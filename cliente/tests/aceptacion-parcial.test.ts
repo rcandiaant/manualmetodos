@@ -236,5 +236,5 @@ describe('propiedad: subconjuntos aleatorios aceptados quedan en su lugar (C1)',
     expect(aplicados + lanzados).toBe(1200);
     expect(conPrimerHijo).toBeGreaterThan(30); // las cadenas de primeros hijos se ejercitan
     expect(lanzados, [...mensajes].join('\n')).toBeLessThan(aplicados / 10);
-  });
+  }, 20000); // ~3 s sola; con la suite en paralelo superaba los 5 s por omisión
 });
