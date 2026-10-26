@@ -13,7 +13,11 @@
     },
     "autoload": {
         "psr-4": {
-            "Manual\\": "src/",
+            "Manual\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
             "Manual\\Pruebas\\": "tests/"
         }
     },

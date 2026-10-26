@@ -1,0 +1,54 @@
+/* Registro de cambios (#/informe). Todo bajo .vista-informe; usa las variables de editor/estilos.css. */
+
+.vista-informe { max-width: 1400px; }
+.vista-informe .avance-informe,
+.vista-informe .vacio-informe,
+.vista-informe .sin-filas-informe { color: var(--tenue); padding: 8px 0; }
+.vista-informe .error { margin: 12px 0; padding: 10px 14px; border-radius: var(--radio); }
+.vista-informe .fallos-informe ul { margin: 6px 0; padding-left: 20px; }
+.vista-informe .ayuda-informe { margin: 12px 0 8px; max-width: 80ch; }
+
+.vista-informe .filtros-informe { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; font-size: 0.9rem; }
+.vista-informe .acciones-informe { display: flex; gap: 8px; margin: 8px 0; }
+.vista-informe .contadores-informe { margin: 12px 0 6px; font-weight: 600; }
+.vista-informe .titulo-impreso { display: none; }
+
+.vista-informe .tabla-informe { width: 100%; border-collapse: collapse; font-size: 0.85rem; background: var(--papel); }
+.vista-informe .tabla-informe th,
+.vista-informe .tabla-informe td { border: 1px solid var(--borde); padding: 4px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.vista-informe .tabla-informe th { background: #f3f1ec; position: sticky; top: 0; }
+.vista-informe .tabla-informe .cambio-informe { min-width: 18ch; }
+.vista-informe .original-informe { color: var(--eliminado); text-decoration: line-through; }
+.vista-informe .original-informe + .propuesta-informe::before { content: '→ '; color: var(--tenue); }
+.vista-informe .propuesta-informe { color: var(--insertado); }
+.vista-informe tr[data-tipo='comentario'] .original-informe { color: var(--tenue); text-decoration: none; font-style: italic; }
+.vista-informe tr[data-tipo='comentario'] .propuesta-informe { color: inherit; }
+.vista-informe .etiqueta-cambio {
+  display: inline-block; padding: 0 5px; border: 1px solid var(--borde); border-radius: 3px;
+  background: #f3f1ec; color: var(--tenue); font-size: 0.75rem; font-weight: 600; text-decoration: none;
+}
+.vista-informe .reunion-informe { display: inline-block; font-size: 0.75rem; font-weight: 600; color: var(--acento); }
+.vista-informe .no-encontrado { color: var(--eliminado); font-style: italic; }
+.vista-informe .fecha-informe { white-space: nowrap; }
+.vista-informe .mas-informe { display: flex; gap: 8px; margin: 12px 0; }
+
+/* Solo en pantalla: al imprimir, el ancho de página (A4 vertical ≈ 700px) no debe volver la tabla un bloque con scroll. */
+@media screen and (max-width: 700px) {
+  .vista-informe .tabla-informe { display: block; overflow-x: auto; }
+}
+
+/* Hoja apaisada solo para las páginas del informe (página con nombre; sin soporte, queda vertical). */
+@page informe { size: landscape; margin: 12mm; }
+
+/* Impresión: solo el título con los filtros, los contadores y la tabla completa. */
+@media print {
+  .vista-informe { max-width: none; padding: 0; page: informe; }
+  .vista-informe .cabecera-app,
+  .vista-informe .no-imprimir,
+  .vista-informe .avance-informe { display: none !important; }
+  .vista-informe .titulo-impreso { display: block; margin: 0 0 6px; font-size: 1.1rem; font-weight: 700; }
+  .vista-informe .tabla-informe { font-size: 9.5pt; }
+  .vista-informe .tabla-informe th { position: static; }
+  .vista-informe thead { display: table-header-group; }
+  .vista-informe tr { break-inside: avoid; page-break-inside: avoid; }
+}

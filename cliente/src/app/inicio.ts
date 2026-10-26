@@ -172,6 +172,7 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
       };
 
       const menuAdmin = esAdmin ? el('a', { href: '#/admin', class: 'enlace-boton' }, 'Administración') : null;
+      const informe = esRevisor ? el('a', { href: '#/informe', class: 'enlace-boton' }, 'Registro de cambios') : null;
       const cabecera = el(
         'header',
         { class: 'cabecera-app' },
@@ -179,6 +180,7 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
         el(
           'div',
           { class: 'cabecera-acciones' },
+          informe,
           menuAdmin,
           boton('Salir', pedirSalir),
         ),

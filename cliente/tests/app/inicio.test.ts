@@ -82,6 +82,8 @@ describe('inicio', () => {
       { ...CAPS[0], totalSugerencias: 7, totalComentarios: 3, pendientes: 5 },
     ]);
     expect(enlaces(rev)).toContain('#/revisar/3');
+    expect(enlaces(rev)).toContain('#/informe');
+    expect(enlaces(lab)).not.toContain('#/informe');
     expect(enlaces(rev)).not.toContain('#/capitulo/3');
     expect(rev.textContent).toContain('7 sugerencias');
     expect(rev.textContent).toContain('5 pendientes');

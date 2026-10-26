@@ -24,6 +24,9 @@ import { ErrorApi, SIN_CONEXION, type Api } from '../api';
 import type { Etapa, Final, FinalEntrada, SugerenciaServidor } from '../tipos-api';
 import { componerFinal, sugerenciasVigentes } from './componer';
 import { labDe } from './panel';
+import { nombreTex } from './nombres';
+
+export { nombreTex };
 
 export interface OpcionesFinal {
   api: Api;
@@ -50,19 +53,6 @@ export interface PanelFinal {
   decisionesCambiaron(): void;
   destruir(): void;
   listo: Promise<void>;
-}
-
-/** `cap-1` o, si no sirve, un slug ASCII simple del título (misma forma que exige el servidor: `[a-z0-9-]`). */
-export function nombreTex(slug: string | undefined, titulo: string | undefined, capituloId: number): string {
-  if (slug && /^[a-z0-9-]{1,80}$/.test(slug)) return `${slug}.tex`;
-  const ascii = (titulo ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-  return `${ascii || `capitulo-${capituloId}`}.tex`;
 }
 
 /** Descarga `texto` como archivo UTF-8 con saltos LF. */
