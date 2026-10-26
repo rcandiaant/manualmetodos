@@ -44,6 +44,8 @@ function montar(esc: Escenario = {}) {
     }
     if (metodo === 'GET' && url === '/api/capitulos/3/copia') return json(200, esc.copia ?? { docJson: null });
     if (metodo === 'GET' && url === '/api/consulta') return json(200, consulta(esc.etapa));
+    if (metodo === 'GET' && url === '/api/capitulos/3/comentarios') return json(200, []);
+    if (metodo === 'GET' && url === '/api/capitulos/3/mis-aportes') return json(200, { sugerencias: [], comentarios: [] });
     if (metodo === 'PUT' && url === '/api/capitulos/3/copia') {
       puts.push({ url, cuerpo: JSON.parse(String(init.body)) });
       const r = respuestasPut.shift();

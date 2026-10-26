@@ -14,11 +14,14 @@
  * - 409 `version_obsoleta`: `error` con `codigo`, sin más envíos (la vista pasa a solo lectura). 413/422 y otros errores: `error`
  *   sin reintento automático; un cambio posterior vuelve a intentarlo.
  *
+ * - Task 5: `motivoDe` agrega el motivo a cada sugerencia del cuerpo (el servidor lo toma
+ *   solo en las nuevas) y `alConfirmar` avisa al panel qué sugerencias quedaron en el servidor.
+ *
  * Principio rector: el trabajo nunca se pierde en silencio. Toda copia no confirmada
  * queda en el borrador local y el estado visible dice por qué.
  */
 import { calcularSugerencias } from '../../cambios/sugerencias';
-import type { DocJSON } from '../../tipos';
+import type { DocJSON, Sugerencia } from '../../tipos';
 import { ErrorApi, SIN_CONEXION, type Api } from '../api';
 import type { CopiaEntrada, CopiaGuardada, FechaIso } from '../tipos-api';
 
@@ -101,6 +104,13 @@ export interface OpcionesAutoguardado {
   almacen?: Storage;
   /** `actualizado` de la copia del servidor al abrir (para el borrador y el indicador). */
   actualizado?: FechaIso | null;
+  /**
+   * Motivo que se envía con cada sugerencia (Task 5). El servidor lo toma solo para las
+   * sugerencias nuevas; las que ya existían conservan el suyo (docs/api.md §4.3).
+   */
+  motivoDe?: (s: Sugerencia) => string | undefined;
+  /** Se llama tras cada PUT confirmado con las sugerencias tal como se enviaron. */
+  alConfirmar?: (enviadas: Sugerencia[]) => void;
 }
 
 export interface Autoguardado {
@@ -244,12 +254,22 @@ export function crearAutoguardado(op: OpcionesAutoguardado): Autoguardado {
     fijar('guardando');
     enCurso = (async () => {
       try {
-        const cuerpo: CopiaEntrada = {
-          versionId: op.versionId,
-          docJson: copia,
-          sugerencias: calcularSugerencias(op.base, copia, op.autor),
-        };
+        const sugerencias = calcularSugerencias(op.base, copia, op.autor).map((s) => {
+          let motivo: string | undefined;
+          try {
+            motivo = op.motivoDe?.(s);
+          } catch (e) {
+            console.error('Error en motivoDe del autoguardado', e); // no impide guardar la copia
+          }
+          return motivo ? { ...s, motivo } : s;
+        });
+        const cuerpo: CopiaEntrada = { versionId: op.versionId, docJson: copia, sugerencias };
         const r = await op.api.put<CopiaGuardada>(`/capitulos/${op.capituloId}/copia`, cuerpo);
+        try {
+          op.alConfirmar?.(sugerencias);
+        } catch (e) {
+          console.error('Error en alConfirmar del autoguardado', e);
+        }
         siguienteEspera = PRIMER_REINTENTO_MS;
         if (typeof r?.actualizado === 'string') actualizadoServidor = r.actualizado;
         info = { ...info, ultimoGuardado: reloj.ahora() };

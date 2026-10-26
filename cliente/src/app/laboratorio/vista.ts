@@ -13,6 +13,9 @@
  *   `etapa_no_permite` o `version_obsoleta` (con el borrador no guardado ofrecido para copiar).
  * - Indicador "Guardado hace N s" o el estado del autoguardado; los fallos van además
  *   en una caja `role="alert"`.
+ * - Panel lateral (Task 5): "Mis cambios" con motivos (`panel.ts`), comentarios
+ *   (`comentarios.ts`, botón "Comentar" en la barra) y, en `edicion_final`, "Mis aportes".
+ *   En solo lectura los motivos y comentarios no se editan, pero las listas se ven.
  */
 import { Editor } from '@tiptap/core';
 import { avisosNoCubiertos } from '../../cambios/estructura';
@@ -20,7 +23,7 @@ import { calcularSugerencias } from '../../cambios/sugerencias';
 import { jsonEstable } from '../../cambios/tokens';
 import { crearBarra, type Barra } from '../../editor/barra';
 import { claveDecoraciones, decoracionesDeCambios, textoVisible } from '../../editor/decoraciones';
-import { boton, cajaAvisosEstructura, el, mensajeDe } from '../../editor/ui';
+import { boton, cajaAvisosEstructura, el, mensajeDe, resaltar } from '../../editor/ui';
 import type { DocJSON } from '../../tipos';
 import { ErrorApi, SIN_CONEXION, type Api } from '../api';
 import { formatearFecha } from '../inicio';
@@ -32,12 +35,15 @@ import {
   claveBorrador,
   crearAutoguardado,
   leerBorrador,
+  MENSAJES,
   type Autoguardado,
   type Borrador,
   type InfoGuardado,
   type Reloj,
 } from './autoguardado';
+import { crearComentarios, type Comentarios } from './comentarios';
 import './laboratorio.css';
+import { cajaBorradoresSinEnviar, crearMisAportes, crearPanelCambios, type PanelCambios } from './panel';
 import { extensionesLaboratorio, PERMITIR_ESPECIAL } from './protegidos';
 
 export interface DepsCapitulo {
@@ -81,6 +87,8 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
   let editor: Editor | null = null;
   let barra: Barra | null = null;
   let ag: Autoguardado | null = null;
+  let panelCambios: PanelCambios | null = null;
+  let comentarios: Comentarios | null = null;
   let base: DocJSON | null = null;
   let ultimoServidor: Date | undefined;
   let soloLectura = true;
@@ -114,7 +122,8 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
     const copia = doc.toJSON() as DocJSON;
     try {
       const sugerencias = calcularSugerencias(base, copia, autor);
-      const set = decoracionesDeCambios(doc, sugerencias, base);
+      panelCambios?.actualizar(sugerencias);
+      const set = decoracionesDeCambios(doc, sugerencias, base).add(doc, comentarios?.decoraciones(doc) ?? []);
       editor.view.dispatch(editor.state.tr.setMeta(claveDecoraciones, set).setMeta('addToHistory', false));
       cajaAvisosEstructura(
         avisosEstructura,
@@ -164,6 +173,21 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
   function fijarEditable(si: boolean): void {
     editor?.setEditable(si, false); // sin evento update: no es una edición
     barra?.habilitar(si);
+    panelCambios?.habilitar(si);
+    comentarios?.habilitar(si);
+  }
+
+  /** Un motivo espera una sugerencia que aún no está en el servidor: se guarda la copia ya. */
+  function pedirGuardado(): void {
+    if (!ag || !editor || soloLectura) return;
+    vaciarEspera();
+    if (!ag.sinConfirmar()) ag.cambio(editor.getJSON() as DocJSON);
+    void ag.guardarYa();
+  }
+
+  /** Un PATCH/POST/DELETE del panel respondió 409 `etapa_no_permite`. */
+  function alEtapaCerrada(): void {
+    if (!cerrada) alCambiarEstado({ estado: 'cerrada', mensaje: MENSAJES.cerrada });
   }
 
   /* ---------- Indicador y errores ---------- */
@@ -211,6 +235,9 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
           ? 'Los últimos cambios no alcanzaron a guardarse en el servidor. Quedan en este navegador; puede copiarlos aquí:'
           : 'Todos sus cambios anteriores quedaron guardados.',
         ...(pendiente ? [cajaCopiar(pendiente)] : []),
+        ...(panelCambios?.sinGuardar() || comentarios?.sinGuardar()
+          ? [el('p', {}, 'Hay motivos o comentarios sin guardar: siguen en sus campos del panel para que pueda copiarlos.')]
+          : []),
       );
       errorGuardado.hidden = false;
       return;
@@ -308,6 +335,44 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       avisoEtapa.hidden = false;
     }
 
+    if (!enConsulta) {
+      // Fuera de la consulta los borradores de motivos y comentarios ya no se pueden enviar.
+      const caja = cajaBorradoresSinEnviar(almacen, u.id, capituloId, b.versionId);
+      if (caja) panel.append(caja);
+    }
+    if (consulta.etapa !== 'edicion_final') {
+      panelCambios = crearPanelCambios({
+        api,
+        capituloId,
+        versionId: b.versionId,
+        usuarioId: u.id,
+        almacen,
+        motivoObligatorio: consulta.motivoObligatorio === true,
+        sugerenciasServidor: copia.docJson !== null && !otraVersion ? (copia.sugerencias ?? []) : [],
+        resaltar: (id) => resaltar(areaEditor, id),
+        pedirGuardado,
+        alEtapaCerrada,
+        usarBorrador: enConsulta,
+      });
+      panel.append(panelCambios.elemento);
+    }
+    const aportes = consulta.etapa === 'edicion_final' ? crearMisAportes(api, capituloId) : null;
+    if (aportes) panel.append(aportes.elemento);
+    comentarios = crearComentarios({
+      api,
+      capituloId,
+      usuarioId: u.id,
+      almacen,
+      editor: () => editor,
+      alCambiar: () => {
+        if (vigente) recalcular();
+      },
+      alEtapaCerrada,
+      mostrarLista: consulta.etapa !== 'edicion_final',
+      usarBorrador: enConsulta,
+    });
+    panel.append(comentarios.elemento);
+
     const clave = claveBorrador(u.id, capituloId, b.versionId);
     let borrador = leerBorrador(almacen, clave);
     if (borrador && jsonEstable(borrador.docJson) === jsonEstable(servidorDoc)) {
@@ -323,10 +388,14 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
       onUpdate: () => alEditar(),
     });
     barra = crearBarra(editor);
+    barra.agregar(comentarios.botonComentar);
     barra.habilitar(false);
     areaBarra.replaceChildren(barra.elemento);
     panel.append(barra.panelNota);
     recalcular();
+    // No fatales y sin bloquear el editor: cada sección muestra su propio error con "Reintentar".
+    void comentarios.cargar();
+    void aportes?.cargar();
 
     if (!soloLectura) {
       ag = crearAutoguardado({
@@ -337,6 +406,9 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
         autor,
         almacen,
         actualizado,
+        ...(panelCambios
+          ? { motivoDe: panelCambios.motivoDe, alConfirmar: panelCambios.alConfirmarCopia }
+          : {}),
         ...(deps.esperaMs !== undefined ? { esperaMs: deps.esperaMs } : {}),
         ...(deps.reloj ? { reloj: deps.reloj } : {}),
       });
