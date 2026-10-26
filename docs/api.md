@@ -365,12 +365,14 @@ En desarrollo, sin `--sql`, el comando inserta directamente en la base del entor
 
 ## 6. Checklist de despliegue
 
+El paso a paso en cPanel (subdominio, paquete, base, `.env`, primer administrador, Cron Jobs de respaldo y limpieza, actualización y restauración) está en [`docs/despliegue.md`](despliegue.md).
+
 Revisar cada punto antes de abrir el sitio:
 
 - [ ] **HTTPS** activo en el dominio, con certificado válido.
 - [ ] **Redirección HTTP → HTTPS (301).** El `.htaccess` de `public/` ya redirige toda visita `http://` a `https://`, salvo `localhost`/`127.0.0.1` (desarrollo). Además, activar **«Force HTTPS Redirect»** del dominio en cPanel (*Dominios*); tener ambos no causa problemas. Comprobar después: `curl -I http://<dominio>/api/salud` → `301` con `Location: https://<dominio>/api/salud`. Detrás de un proxy que termina TLS (Cloudflare en modo «Flexible»), el origen ve siempre HTTP y la redirección entraría en bucle: usar el modo «Full (strict)».
 - [ ] **`COOKIE_SEGURA=1`** en el `.env` de producción. **Es obligatorio, porque falla abierto:** sin él, la cookie sale sin `Secure` ni el prefijo `__Host-` y no se emite HSTS. El valor por defecto es 0 para que funcione el desarrollo local sin HTTPS. **Con `COOKIE_SEGURA=1` el sitio debe servirse solo por HTTPS:** por HTTP el navegador descarta la cookie `__Host-`/`Secure`, así que el login responde 200 pero la sesión no persiste (de ahí el punto anterior).
-- [ ] **Paquete de producción con `vendor/` sin dependencias de desarrollo.** En la máquina con Docker, desde la raíz del repo:
+- [ ] **Paquete de producción con `vendor/` sin dependencias de desarrollo.** Lo arma `npm run empaquetar` (desde `cliente/`, script `cliente/scripts/empaquetar.ts`, con el árbol limpio): compila el cliente, hace lo que sigue, valida el contenido y deja `dist/manualmetodos-AAAAMMDD-<sha>.zip` y `.sql`. A mano equivale a, en la máquina con Docker, desde la raíz del repo:
   ```
   docker compose --profile herramientas run --rm composer install --no-dev --optimize-autoloader --classmap-authoritative
   ```
