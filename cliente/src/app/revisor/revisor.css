@@ -92,3 +92,50 @@
 .vista-revisor .coincidencia { background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 6px 8px; }
 .vista-revisor .lado-a-lado { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; margin-top: 4px; }
 .vista-revisor .propuesta-lab { background: var(--papel); margin-top: 4px; }
+
+/* Decisiones (Task 7) */
+.vista-revisor .decisiones { margin-top: 4px; }
+.vista-revisor .decisiones .botones { flex-wrap: wrap; }
+.vista-revisor .decisiones textarea, .vista-revisor .revisor-final textarea {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 4px; font: inherit; font-size: 0.85rem;
+  padding: 4px 6px; border: 1px solid var(--borde); border-radius: 4px; background: var(--papel);
+}
+.vista-revisor .decisiones textarea:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.vista-revisor .form-nota .botones, .vista-revisor .form-nota > button { margin-top: 4px; }
+.vista-revisor .nota-resolucion, .vista-revisor .derivada { margin: 4px 0 0; font-size: 0.8rem; }
+.vista-revisor .derivada { color: var(--acento); font-weight: 600; }
+.vista-revisor .enviando { margin: 4px 0 0; color: var(--tenue); font-size: 0.78rem; }
+.vista-revisor .fallo-decision {
+  margin: 4px 0 0; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;
+  background: #fdecea; border: 1px solid var(--eliminado); color: #7f1d1d;
+}
+.vista-revisor .fallo-decision button { margin-left: 4px; padding: 1px 8px; font-size: 0.8rem; }
+.vista-revisor .por-rechazar { outline: 2px dashed var(--eliminado); outline-offset: 1px; }
+.vista-revisor .marca-por-rechazar {
+  padding: 0 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;
+  background: var(--eliminado); color: #fff;
+}
+.vista-revisor .acciones-conflicto { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--conflicto); }
+.vista-revisor .confirmacion-conflicto {
+  margin: 0 0 10px; padding: 8px 10px; border-radius: var(--radio);
+  background: #fff8db; border: 2px solid var(--conflicto); font-size: 0.85rem;
+}
+.vista-revisor .confirmacion-conflicto h2 { margin: 0 0 4px; font-size: 0.95rem; }
+.vista-revisor .confirmacion-conflicto p { margin: 0 0 6px; }
+
+/* Versión final */
+.vista-revisor .revisor-final {
+  margin-top: 16px; padding: 12px 16px; background: var(--papel);
+  border: 1px solid var(--borde); border-radius: var(--radio);
+}
+.vista-revisor .revisor-final h2 { margin: 0 0 6px; font-size: 1.05rem; }
+.vista-revisor .revisor-final .aviso, .vista-revisor .revisor-final .error { margin: 8px 0 0; }
+.vista-revisor .revisor-final .botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.vista-revisor .revisor-final .botones button:disabled { cursor: not-allowed; opacity: 0.6; }
+.vista-revisor .aviso-exportar ul { margin: 4px 0; padding-left: 18px; max-height: 12rem; overflow: auto; }
+.vista-revisor .estado-final { margin: 8px 0 0; color: var(--tenue); font-size: 0.85rem; }
+.vista-revisor .retomar-final { margin-top: 6px; font-size: 0.85rem; }
+.vista-revisor .editor-final {
+  margin-top: 8px; padding: 16px 20px; border: 1px solid var(--acento); border-radius: var(--radio); background: var(--papel);
+}
+.vista-revisor .editor-final:focus-within { outline: 2px solid var(--acento); outline-offset: 2px; }

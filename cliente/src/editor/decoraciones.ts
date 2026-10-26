@@ -180,8 +180,10 @@ export interface OpcionesRevisor {
    * Etiqueta del autor (opcional): `titulo` va como `title` en todas las marcas de la
    * sugerencia y `abreviatura` como `data-lab` en su última marca (la propuesta, o el
    * tachado si no hay propuesta), para identificar al laboratorio sin depender del color.
+   * Recibe también el id de la sugerencia: una propuesta idéntica de varios laboratorios
+   * se dibuja una sola vez con la etiqueta de todos.
    */
-  etiquetaAutor?: (autor: string) => { titulo: string; abreviatura: string } | undefined;
+  etiquetaAutor?: (autor: string, id: string) => { titulo: string; abreviatura: string } | undefined;
 }
 
 /**
@@ -206,7 +208,7 @@ export function decoracionesRevisor(
       .join(' ');
   /** Atributos de etiqueta: `title` siempre; `data-lab` solo si `ultima`. */
   const etiqueta = (s: Sugerencia, ultima: boolean): Record<string, string> => {
-    const e = opciones.etiquetaAutor?.(s.autor);
+    const e = opciones.etiquetaAutor?.(s.autor, s.id);
     if (!e) return {};
     return ultima ? { title: e.titulo, 'data-lab': e.abreviatura } : { title: e.titulo };
   };

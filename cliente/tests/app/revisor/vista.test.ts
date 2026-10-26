@@ -31,6 +31,7 @@ async function montar(opciones: { etapa?: Etapa; query?: string; datos?: Aportes
     if (url === '/api/capitulos/3/aportes') {
       return opciones.aportesError ? error(403, opciones.aportesError) : json(200, datos);
     }
+    if (url === '/api/capitulos/3/final') return error(404, 'no_encontrado'); // sin versión final guardada (Task 7)
     throw new Error(`ruta inesperada ${url}`);
   }) as unknown as typeof fetch;
   const api = crearApi({ fetch: fetchRuta, alSinSesion: () => {} });

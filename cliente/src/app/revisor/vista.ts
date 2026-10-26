@@ -1,16 +1,19 @@
 /**
  * Vista del revisor (`#/revisar/{id}`): la base (solo lectura) con las sugerencias de
  * todos los laboratorios superpuestas, un color por laboratorio; al lado, la cola de
- * conflictos y los aportes por bloque, con filtros que se recuerdan en la URL.
+ * conflictos y los aportes por bloque, con filtros que se recuerdan en la URL; debajo,
+ * la versión final (Task 7).
  * Las decisiones solo se habilitan en `edicion_final` (docs/api.md §3).
  */
 import { Editor } from '@tiptap/core';
 import { claveDecoraciones, decoracionesRevisor } from '../../editor/decoraciones';
 import { extensionesDemo } from '../../editor/editor';
-import { el, mensajeDe } from '../../editor/ui';
+import { boton, el, mensajeDe } from '../../editor/ui';
 import { ErrorApi, SIN_CONEXION, type Api } from '../api';
 import type { Vista } from '../router';
-import type { Aportes, Base, CapituloLista, Consulta, Etapa } from '../tipos-api';
+import type { Aportes, Base, CapituloLista, Consulta, Etapa, SugerenciaServidor } from '../tipos-api';
+import { crearDecisiones, type Decisiones } from './decisiones';
+import { montarFinal, nombreTex, type PanelFinal } from './final';
 import {
   abreviaturaLab,
   analizarConflictos,
@@ -23,6 +26,7 @@ import {
   dibujarPanel,
   labDe,
   leerFiltros,
+  representantes,
   type ConflictoCola,
   type ContextoPanel,
   type Filtros,
@@ -52,6 +56,9 @@ const AVISO_ETAPA: Partial<Record<Etapa, string>> = {
   preparacion: 'La consulta aún no comienza. Las decisiones se habilitan en la edición final.',
 };
 
+const nombresLabs = (sugs: SugerenciaServidor[]): string => [...new Set(sugs.map((s) => labDe(s).laboratorio))].join(', ');
+
+
 export function vistaRevisor(
   api: Api,
   capituloId: number,
@@ -60,6 +67,7 @@ export function vistaRevisor(
   let vigente = true;
   let listo: Promise<void> = Promise.resolve();
   let editor: Editor | null = null;
+  let final: PanelFinal | null = null;
   let filtros: Filtros = leerFiltros(consulta);
   const rutaBase = `#/revisar/${capituloId}`;
 
@@ -80,11 +88,28 @@ export function vistaRevisor(
       const tituloCola = el('h2', {}, 'Conflictos');
       const panel = el('div', { class: 'panel-bloques' });
       const coincidencias = el('div', { class: 'contenedor-coincidencias', hidden: '' });
+      /** Confirmación en la página al aceptar una propuesta en conflicto (sin `confirm()`). */
+      const confirmacion = el('section', {
+        class: 'confirmacion-conflicto',
+        'aria-labelledby': 'titulo-confirmacion-conflicto',
+        hidden: '',
+      });
+      const seccionFinal = el('section', { class: 'revisor-final', 'aria-label': 'Versión final', hidden: '' });
       const cuerpo = el(
         'div',
         { class: 'revisor', hidden: '' },
         el('section', { class: 'revisor-documento', 'aria-label': 'Documento base con las sugerencias' }, areaEditor),
-        el('aside', { class: 'revisor-panel' }, leyenda, tituloCola, cola, coincidencias, el('h2', {}, 'Aportes por bloque'), panel),
+        el(
+          'aside',
+          { class: 'revisor-panel' },
+          confirmacion,
+          leyenda,
+          tituloCola,
+          cola,
+          coincidencias,
+          el('h2', {}, 'Aportes por bloque'),
+          panel,
+        ),
       );
       raiz.append(
         el(
@@ -100,6 +125,7 @@ export function vistaRevisor(
           avisos,
           barra,
           cuerpo,
+          seccionFinal,
         ),
       );
 
@@ -114,12 +140,11 @@ export function vistaRevisor(
         api.get<Base>(`/capitulos/${capituloId}/base`),
         api.get<Aportes>(`/capitulos/${capituloId}/aportes`),
       ]).then(
-        ([cons, capitulos, base, aportes]) => {
+        async ([cons, capitulos, base, aportes]) => {
           if (!vigente) return;
           try {
             const cap = capitulos.find((c) => c.id === capituloId);
             if (cap) titulo.textContent = `${cap.orden}. ${cap.titulo}`;
-            const ctx: ContextoPanel = { base: base.docJson, versionId: base.versionId, etapa: cons.etapa };
             const avisoEtapa = AVISO_ETAPA[cons.etapa];
             if (avisoEtapa) avisos.append(el('p', { class: 'aviso aviso-etapa', role: 'status' }, avisoEtapa));
 
@@ -132,15 +157,6 @@ export function vistaRevisor(
             labs.sort((a, b) => a.laboratorio.localeCompare(b.laboratorio, 'es'));
             leyenda.replaceChildren(...labs.map((l) => el('li', {}, chipLab(l), ' ', l.laboratorio)));
 
-            const analisis = analizarConflictos(aportes.sugerencias, base.docJson, base.versionId);
-            const colaCompleta = analisis.cola;
-            const enConflicto = new Set(colaCompleta.flatMap((c) => c.ids));
-            // Etiqueta de cada marca del documento: nombre (title) y abreviatura del laboratorio.
-            const porAutor = new Map(aportes.sugerencias.map((x) => [x.autor, labDe(x)] as const));
-            const etiquetaAutor = (autor: string) => {
-              const l = porAutor.get(autor);
-              return l ? { titulo: l.laboratorio, abreviatura: abreviaturaLab(l.laboratorio) } : undefined;
-            };
             const sinAportes = aportes.sugerencias.length === 0 && aportes.comentarios.length === 0;
             const anteriores = aportes.sugerencias.filter((s) => s.versionId !== undefined && s.versionId !== base.versionId).length;
             if (anteriores > 0) {
@@ -160,7 +176,55 @@ export function vistaRevisor(
               editable: false,
             });
 
+            const decisiones: Decisiones = crearDecisiones({
+              api,
+              todas: aportes.sugerencias,
+              versionId: base.versionId,
+              alCambiar: (decidido) => {
+                if (!vigente) return;
+                redibujar();
+                if (decidido) final?.decisionesCambiaron();
+              },
+            });
+            const ctx: ContextoPanel = {
+              base: base.docJson,
+              versionId: base.versionId,
+              etapa: cons.etapa,
+              alDecidir: (sugs, cambio) => void decisiones.decidir(sugs, cambio),
+              envio: (sugs) => decisiones.envio(sugs),
+              alReintentar: (sugs) => void decisiones.reintentar(sugs),
+              alResolverComentario: (c, estado, nota) => void decisiones.resolverComentario(c, estado, nota),
+              errorComentario: (c) => decisiones.errorComentario(c),
+            };
+
+            let confirmacionMostrada: unknown = null;
+            const dibujarConfirmacion = () => {
+              const c = decisiones.confirmacion();
+              const nueva = c !== confirmacionMostrada;
+              confirmacionMostrada = c;
+              confirmacion.replaceChildren();
+              confirmacion.hidden = c === null;
+              if (!c) return;
+              const confirmar = boton('Confirmar', () => void decisiones.confirmar(), 'primario');
+              confirmacion.append(
+                el('h2', { id: 'titulo-confirmacion-conflicto' }, 'Confirmar la decisión del conflicto'),
+                el(
+                  'p',
+                  {},
+                  `Aceptar la propuesta de ${nombresLabs(c.elegidas)} deja por rechazar ` +
+                    `${c.otros.length === 1 ? 'la propuesta' : `${c.otros.length} sugerencias`} de ${nombresLabs(c.otros)}: ` +
+                    'en un conflicto no se pueden aceptar propuestas de dos laboratorios.',
+                ),
+                el('div', { class: 'botones' }, confirmar, boton('Cancelar', () => decisiones.cancelar(), 'secundario')),
+              );
+              if (nueva) confirmar.focus(); // lleva la vista a la pregunta, una sola vez
+            };
+
             const redibujar = () => {
+              // Los conflictos se recalculan: dependen de qué sigue pendiente.
+              const analisis = analizarConflictos(aportes.sugerencias, base.docJson, base.versionId);
+              const colaCompleta = analisis.cola;
+              const enConflicto = new Set(colaCompleta.flatMap((c) => c.ids));
               const datos = aplicarFiltros(aportes, filtros, enConflicto);
               const visibles = (lista: ConflictoCola[]) =>
                 filtros.ver === 'comentarios'
@@ -168,14 +232,33 @@ export function vistaRevisor(
                   : lista.filter((c) => filtros.lab === null || c.sugerencias.some((s) => labDe(s).usuarioId === filtros.lab));
               const deLaCola = visibles(colaCompleta);
               tituloCola.textContent = `Conflictos (${deLaCola.length})`;
+              dibujarConfirmacion();
               dibujarCola(cola, deLaCola, ctx);
               dibujarCoincidencias(coincidencias, filtros.soloConflictos ? [] : visibles(analisis.coincidencias), ctx);
               dibujarPanel(panel, datos, ctx, sinAportes);
               if (editor) {
                 // Sobre el documento, solo las sugerencias de la base vigente (las otras no ubican sus rangos).
                 const vigentes = datos.sugerencias.filter((s) => s.versionId === undefined || s.versionId === base.versionId);
+                const { sugs, labsDe } = representantes(vigentes);
+                const estadoDe = new Map(sugs.map((s) => [s.id, s.estado] as const));
+                const etiquetaAutor = (_autor: string, id: string) => {
+                  const ls = labsDe.get(id);
+                  if (!ls || ls.length === 0) return undefined;
+                  return {
+                    titulo: ls.map((l) => l.laboratorio).join(', '),
+                    abreviatura: ls.map((l) => abreviaturaLab(l.laboratorio)).join('·'),
+                  };
+                };
                 try {
-                  const set = decoracionesRevisor(editor.state.doc, vigentes, { conflictos: colaCompleta, claseAutor, etiquetaAutor });
+                  const set = decoracionesRevisor(editor.state.doc, sugs, {
+                    conflictos: colaCompleta,
+                    claseAutor,
+                    etiquetaAutor,
+                    decision: (id) => {
+                      const e = estadoDe.get(id);
+                      return e === 'aceptada' || e === 'rechazada' ? e : undefined;
+                    },
+                  });
                   editor.view.dispatch(editor.state.tr.setMeta(claveDecoraciones, set));
                 } catch (e) {
                   mostrarError(`No se pudieron mostrar las sugerencias sobre el documento: ${mensajeDe(e)}`);
@@ -225,6 +308,18 @@ export function vistaRevisor(
             barra.hidden = false;
             cuerpo.hidden = false;
             redibujar();
+
+            final = montarFinal(seccionFinal, {
+              api,
+              capituloId,
+              base: base.docJson,
+              versionId: base.versionId,
+              etapa: cons.etapa,
+              sugerencias: aportes.sugerencias,
+              nombreArchivo: nombreTex(cap?.slug, cap?.titulo, capituloId),
+            });
+            seccionFinal.hidden = false;
+            await final.listo;
           } catch (e) {
             // Un fallo al armar la vista (p. ej. el editor) no queda como promesa rechazada en silencio.
             mostrarError(`No se pudo mostrar la revisión: ${mensajeDe(e)}`);
@@ -240,6 +335,8 @@ export function vistaRevisor(
       vigente = false;
       editor?.destroy();
       editor = null;
+      final?.destruir();
+      final = null;
     },
     get listo() {
       return listo;
