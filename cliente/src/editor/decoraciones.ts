@@ -78,11 +78,13 @@ function widget(
   spec: Record<string, unknown>,
   bloque = false,
   side = -1,
+  atributos: Record<string, string> = {},
 ): Decoration {
   const crear = () => {
     const el = document.createElement(bloque ? 'div' : 'span');
     el.className = clase;
     el.textContent = texto;
+    for (const [k, v] of Object.entries(atributos)) el.setAttribute(k, v);
     el.contentEditable = 'false';
     if (typeof spec.id === 'string') el.dataset.sug = spec.id;
     return el;
@@ -90,7 +92,7 @@ function widget(
   return Decoration.widget(pos, crear, {
     side,
     ignoreSelection: true,
-    key: `${String(spec.id)}|${String(spec.tipo)}|${clase}|${texto}`,
+    key: `${String(spec.id)}|${String(spec.tipo)}|${clase}|${texto}|${atributos['data-lab'] ?? ''}|${atributos.title ?? ''}`,
     texto,
     ...spec,
   });
@@ -174,6 +176,14 @@ export interface OpcionesRevisor {
   claseAutor?: (autor: string) => string;
   /** Decisión del revisor sobre cada sugerencia, si la hay. */
   decision?: (id: string) => 'aceptada' | 'rechazada' | undefined;
+  /**
+   * Etiqueta del autor (opcional): `titulo` va como `title` en todas las marcas de la
+   * sugerencia y `abreviatura` como `data-lab` en su última marca (la propuesta, o el
+   * tachado si no hay propuesta), para identificar al laboratorio sin depender del color.
+   * Recibe también el id de la sugerencia: una propuesta idéntica de varios laboratorios
+   * se dibuja una sola vez con la etiqueta de todos.
+   */
+  etiquetaAutor?: (autor: string, id: string) => { titulo: string; abreviatura: string } | undefined;
 }
 
 /**
@@ -196,6 +206,12 @@ export function decoracionesRevisor(
     ]
       .filter(Boolean)
       .join(' ');
+  /** Atributos de etiqueta: `title` siempre; `data-lab` solo si `ultima`. */
+  const etiqueta = (s: Sugerencia, ultima: boolean): Record<string, string> => {
+    const e = opciones.etiquetaAutor?.(s.autor, s.id);
+    if (!e) return {};
+    return ultima ? { title: e.titulo, 'data-lab': e.abreviatura } : { title: e.titulo };
+  };
   const decos: Decoration[] = [];
   sugerencias.forEach((s, i) => {
     const side = 1 + i;
@@ -206,14 +222,14 @@ export function decoracionesRevisor(
       decos.push(widget(pos, textoVisible(s.propuesta), clases(s, 'rev-bloque-insertado'), {
         tipo: 'bloque-insertado',
         id: s.id,
-      }, true, side));
+      }, true, side, etiqueta(s, true)));
       return;
     }
     if (s.tipo === 'bloque-eliminado') {
       const u = ubicarBloque(doc, s.bloqueId);
       if (!u) return;
       decos.push(
-        Decoration.node(u.pos, u.pos + u.node.nodeSize, { class: clases(s, 'rev-bloque-eliminado'), 'data-sug': s.id }, {
+        Decoration.node(u.pos, u.pos + u.node.nodeSize, { class: clases(s, 'rev-bloque-eliminado'), 'data-sug': s.id, ...etiqueta(s, true) }, {
           tipo: 'bloque-eliminado',
           id: s.id,
         }),
@@ -223,20 +239,20 @@ export function decoracionesRevisor(
     const desde = posicionEnDoc(doc, s.bloqueId, s.base.desde);
     const hasta = posicionEnDoc(doc, s.bloqueId, s.base.hasta);
     if (s.tipo === 'formato') {
-      decos.push(Decoration.inline(desde, hasta, { class: clases(s, 'rev-formato'), 'data-sug': s.id }, {
+      decos.push(Decoration.inline(desde, hasta, { class: clases(s, 'rev-formato'), 'data-sug': s.id, ...etiqueta(s, true) }, {
         tipo: 'formato',
         id: s.id,
       }));
       return;
     }
     if (hasta > desde) {
-      decos.push(Decoration.inline(desde, hasta, { class: clases(s, 'rev-eliminado'), 'data-sug': s.id }, {
+      decos.push(Decoration.inline(desde, hasta, { class: clases(s, 'rev-eliminado'), 'data-sug': s.id, ...etiqueta(s, s.propuesta.length === 0) }, {
         tipo: 'eliminacion',
         id: s.id,
       }));
     }
     if (s.propuesta.length > 0) {
-      decos.push(widget(hasta, textoVisible(s.propuesta), clases(s, 'rev-insertado'), { tipo: 'insercion', id: s.id }, false, side));
+      decos.push(widget(hasta, textoVisible(s.propuesta), clases(s, 'rev-insertado'), { tipo: 'insercion', id: s.id }, false, side, etiqueta(s, true)));
     }
   });
   // Recuadro naranjo por conflicto.

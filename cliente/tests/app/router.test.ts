@@ -152,4 +152,20 @@ describe('router', () => {
     expect(raiz.textContent).toBe('capitulos');
     consola.mockRestore();
   });
+  it('la consulta del hash llega a la vista y se conserva en la url', async () => {
+    const raiz = document.createElement('div');
+    const vistos: string[] = [];
+    const vista = (p: Record<string, string>, q?: URLSearchParams): Vista => ({
+      montar: () => void vistos.push(`${p.id} ${q?.toString() ?? '-'}`),
+      desmontar() {},
+    });
+    router = definirRutas({ '#/capitulos': vista, '#/revisar/:id': vista }, raiz);
+    await router.listo; // el arranque con '#' redirige a #/capitulos antes de navegar
+    await router.navegar('#/revisar/3?lab=12&solo=conflictos');
+    expect(location.hash).toBe('#/revisar/3?lab=12&solo=conflictos');
+    expect(vistos.at(-1)).toBe('3 lab=12&solo=conflictos');
+    // Sin consulta, la vista recibe una vacía.
+    await router.navegar('#/revisar/4');
+    expect(vistos.at(-1)).toBe('4 ');
+  });
 });

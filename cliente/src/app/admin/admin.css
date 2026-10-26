@@ -1,0 +1,26 @@
+/* Administración. Usa las variables de editor/estilos.css. */
+.admin { max-width: 1040px; }
+.admin label { display: block; font-weight: 600; font-size: 0.9rem; margin: 10px 0 4px; }
+.admin .campo input[type=checkbox] { display: inline-block; }
+.admin input[type=text], .admin input[type=number], .admin input[type=search], .admin input[type=datetime-local], .admin textarea {
+  font: inherit; padding: 6px 8px; border: 1px solid var(--borde); border-radius: 4px; max-width: 100%;
+}
+.admin textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; }
+.admin input:disabled { background: var(--fondo); color: var(--tenue); }
+.admin .acciones { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.admin .error, .admin .error-campo { color: var(--eliminado); margin: 6px 0; }
+.admin .exito { color: var(--insertado); background: var(--insertado-fondo); padding: 8px 12px; border-radius: var(--radio); margin: 8px 0; }
+.admin .bloqueo, .admin .advertencia, .admin .confirmar {
+  background: var(--conflicto-fondo); border-left: 4px solid var(--conflicto); padding: 8px 12px; margin: 8px 0; border-radius: var(--radio);
+}
+.admin .vista-previa, .admin .panel-claves {
+  background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 10px 14px; margin: 12px 0;
+}
+.admin .especiales code { white-space: pre-wrap; word-break: break-word; }
+.admin .esquema-previo { max-height: 260px; overflow: auto; color: var(--tenue); font-size: 0.85rem; }
+.admin .tabla { width: 100%; border-collapse: collapse; background: var(--papel); font-size: 0.9rem; }
+.admin .tabla th, .admin .tabla td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+.admin .roles label { display: inline-block; margin: 0 8px 0 0; font-weight: 400; }
+.admin .inactivo { color: var(--eliminado); }
+.admin .panel-claves code { font-size: 1rem; }
+.admin .vacio { color: var(--tenue); }

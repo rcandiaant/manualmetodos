@@ -1,0 +1,141 @@
+/* Vista del revisor (Task 6). Todo acotado bajo .vista-revisor para no afectar a otras
+   vistas. Usa las variables de editor/estilos.css. */
+
+/* Paleta de 12 colores por laboratorio (indiceColor(usuarioId)); la abreviatura
+   (chips y marcas del documento) distingue a quien no distingue colores. */
+.vista-revisor .lab-c0 { --color-lab: #1f5fa8; }
+.vista-revisor .lab-c1 { --color-lab: #c62828; }
+.vista-revisor .lab-c2 { --color-lab: #2e7d32; }
+.vista-revisor .lab-c3 { --color-lab: #6a1b9a; }
+.vista-revisor .lab-c4 { --color-lab: #8d5524; }
+.vista-revisor .lab-c5 { --color-lab: #ad1457; }
+.vista-revisor .lab-c6 { --color-lab: #00838f; }
+.vista-revisor .lab-c7 { --color-lab: #827717; }
+.vista-revisor .lab-c8 { --color-lab: #37474f; }
+.vista-revisor .lab-c9 { --color-lab: #9a6a00; }
+.vista-revisor .lab-c10 { --color-lab: #0277bd; }
+.vista-revisor .lab-c11 { --color-lab: #558b2f; }
+.vista-revisor .lab-sin-color { --color-lab: var(--tenue); }
+
+.app.vista-revisor { max-width: 1400px; }
+
+/* Decoraciones sobre la base */
+.vista-revisor .rev-eliminado[class*='lab-'] { text-decoration-color: var(--color-lab); }
+.vista-revisor .rev-insertado[class*='lab-'], .vista-revisor .rev-bloque-insertado[class*='lab-'] {
+  color: var(--color-lab); background: color-mix(in srgb, var(--color-lab) 12%, white);
+}
+.vista-revisor .rev-formato[class*='lab-'] { text-decoration-color: var(--color-lab); }
+.vista-revisor .rev-bloque-eliminado[class*='lab-'] { border-left: 3px solid var(--color-lab); }
+/* Abreviatura del laboratorio tras su marca (data-lab, ver decoracionesRevisor). */
+.vista-revisor .editor [data-lab]::after {
+  content: attr(data-lab);
+  display: inline-block; margin-left: 2px; padding: 0 3px; border-radius: 3px;
+  background: var(--color-lab, var(--tenue)); color: #fff;
+  font-size: 0.65em; font-weight: 700; line-height: 1.3; vertical-align: super;
+  text-decoration: none; font-style: normal; user-select: none;
+}
+
+/* Disposición */
+.vista-revisor .avisos-revisor .aviso { margin: 8px 0 0; }
+.vista-revisor > .error { margin: 8px 0 0; }
+.vista-revisor .filtros-revisor {
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  margin-top: 12px; padding: 8px 12px; background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio);
+  font-size: 0.9rem;
+}
+.vista-revisor .filtros-revisor label { display: inline-flex; align-items: center; gap: 4px; }
+.vista-revisor .filtros-revisor select:focus-visible, .vista-revisor .filtros-revisor input:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+.vista-revisor .revisor { display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 16px; margin-top: 12px; align-items: start; }
+.vista-revisor .revisor-documento .editor { background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 16px 20px; }
+.vista-revisor .revisor-panel { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; }
+.vista-revisor .revisor-panel h2 { font-size: 1rem; margin: 14px 0 6px; }
+.vista-revisor .revisor-panel .vacio { color: var(--tenue); font-size: 0.85rem; margin: 4px 0; }
+@media (max-width: 900px) {
+  .vista-revisor .revisor { grid-template-columns: 1fr; }
+  .vista-revisor .revisor-panel { position: static; max-height: none; }
+}
+
+/* Chips y leyenda */
+.vista-revisor .chip-lab {
+  display: inline-block; min-width: 2em; padding: 1px 6px; border-radius: 999px; text-align: center;
+  background: var(--color-lab); color: #fff; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.02em;
+}
+.vista-revisor .chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.vista-revisor .leyenda-labs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.8rem; }
+
+/* Bloques, filas y comentarios */
+.vista-revisor .bloque-aportes { background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 8px 10px; margin-bottom: 8px; }
+.vista-revisor .bloque-aportes h3 { font-size: 0.9rem; margin: 0 0 6px; display: flex; justify-content: space-between; gap: 8px; }
+.vista-revisor .titulo-bloque { font-weight: 600; }
+.vista-revisor .contador-labs { color: var(--tenue); font-weight: 400; white-space: nowrap; }
+.vista-revisor .filas, .vista-revisor .comentarios { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vista-revisor .comentarios { margin-top: 6px; }
+.vista-revisor .fila-propuesta, .vista-revisor .comentario, .vista-revisor .propuesta-lab {
+  border-left: 3px solid var(--color-lab, var(--borde)); padding: 4px 8px; font-size: 0.85rem;
+}
+.vista-revisor .comentario { --color-lab: var(--tenue); background: var(--fondo); }
+.vista-revisor .comentario.estado-resuelto { opacity: 0.75; }
+.vista-revisor .fila-cabeza { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vista-revisor .etiqueta-tipo { font-weight: 600; }
+.vista-revisor .estado { color: var(--tenue); font-size: 0.78rem; }
+.vista-revisor .version-anterior { font-size: 0.75rem; padding: 0 6px; border: 1px solid var(--borde); border-radius: 4px; color: var(--tenue); }
+.vista-revisor .labs-fila { color: var(--tenue); font-size: 0.78rem; }
+.vista-revisor .texto-comentario { margin: 4px 0 0; white-space: pre-wrap; }
+.vista-revisor .motivo-leido { margin: 4px 0 0; font-style: italic; }
+.vista-revisor .botones { display: flex; gap: 6px; margin-top: 4px; }
+.vista-revisor .botones button { padding: 2px 10px; font-size: 0.8rem; }
+.vista-revisor .botones button:disabled { cursor: not-allowed; }
+
+/* Cola de conflictos y coincidencias */
+.vista-revisor .cola-conflictos, .vista-revisor .coincidencias { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.vista-revisor .conflicto { background: var(--conflicto-fondo); border: 1px solid var(--conflicto); border-radius: var(--radio); padding: 6px 8px; }
+.vista-revisor .coincidencia { background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 6px 8px; }
+.vista-revisor .lado-a-lado { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; margin-top: 4px; }
+.vista-revisor .propuesta-lab { background: var(--papel); margin-top: 4px; }
+
+/* Decisiones (Task 7) */
+.vista-revisor .decisiones { margin-top: 4px; }
+.vista-revisor .decisiones .botones { flex-wrap: wrap; }
+.vista-revisor .decisiones textarea, .vista-revisor .revisor-final textarea {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 4px; font: inherit; font-size: 0.85rem;
+  padding: 4px 6px; border: 1px solid var(--borde); border-radius: 4px; background: var(--papel);
+}
+.vista-revisor .decisiones textarea:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.vista-revisor .form-nota .botones, .vista-revisor .form-nota > button { margin-top: 4px; }
+.vista-revisor .nota-resolucion, .vista-revisor .derivada { margin: 4px 0 0; font-size: 0.8rem; }
+.vista-revisor .derivada { color: var(--acento); font-weight: 600; }
+.vista-revisor .enviando { margin: 4px 0 0; color: var(--tenue); font-size: 0.78rem; }
+.vista-revisor .fallo-decision {
+  margin: 4px 0 0; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;
+  background: #fdecea; border: 1px solid var(--eliminado); color: #7f1d1d;
+}
+.vista-revisor .fallo-decision button { margin-left: 4px; padding: 1px 8px; font-size: 0.8rem; }
+.vista-revisor .por-rechazar { outline: 2px dashed var(--eliminado); outline-offset: 1px; }
+.vista-revisor .marca-por-rechazar {
+  padding: 0 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;
+  background: var(--eliminado); color: #fff;
+}
+.vista-revisor .acciones-conflicto { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--conflicto); }
+.vista-revisor .confirmacion-conflicto {
+  margin: 0 0 10px; padding: 8px 10px; border-radius: var(--radio);
+  background: #fff8db; border: 2px solid var(--conflicto); font-size: 0.85rem;
+}
+.vista-revisor .confirmacion-conflicto h2 { margin: 0 0 4px; font-size: 0.95rem; }
+.vista-revisor .confirmacion-conflicto p { margin: 0 0 6px; }
+
+/* Versión final */
+.vista-revisor .revisor-final {
+  margin-top: 16px; padding: 12px 16px; background: var(--papel);
+  border: 1px solid var(--borde); border-radius: var(--radio);
+}
+.vista-revisor .revisor-final h2 { margin: 0 0 6px; font-size: 1.05rem; }
+.vista-revisor .revisor-final .aviso, .vista-revisor .revisor-final .error { margin: 8px 0 0; }
+.vista-revisor .revisor-final .botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.vista-revisor .revisor-final .botones button:disabled { cursor: not-allowed; opacity: 0.6; }
+.vista-revisor .aviso-exportar ul { margin: 4px 0; padding-left: 18px; max-height: 12rem; overflow: auto; }
+.vista-revisor .estado-final { margin: 8px 0 0; color: var(--tenue); font-size: 0.85rem; }
+.vista-revisor .retomar-final { margin-top: 6px; font-size: 0.85rem; }
+.vista-revisor .editor-final {
+  margin-top: 8px; padding: 16px 20px; border: 1px solid var(--acento); border-radius: var(--radio); background: var(--papel);
+}
+.vista-revisor .editor-final:focus-within { outline: 2px solid var(--acento); outline-offset: 2px; }
