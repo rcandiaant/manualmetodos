@@ -63,7 +63,8 @@ export function limpiarPegado(slice: Slice): Slice {
   return new Slice(limpiarFragmento(slice.content), slice.openStart, slice.openEnd);
 }
 
-const BloquesNuevos = Extension.create({
+/** R27 como extensión (exportada para el mini-editor de notas de `barra.ts`). */
+export const BloquesNuevos = Extension.create({
   name: 'bloquesNuevos',
   addProseMirrorPlugins() {
     return [

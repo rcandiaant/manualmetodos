@@ -7,6 +7,7 @@ import '../editor/estilos.css';
 import './app.css';
 import { crearApi } from './api';
 import { vistaInicio } from './inicio';
+import { vistaCapitulo } from './laboratorio/vista';
 import { definirRutas, navegar, RUTA_INICIO, type Vista } from './router';
 import { iniciar, conCompuerta, manejarSinSesion, RUTA_LOGIN, salir, usuarioActual, vistaLogin } from './sesion';
 import type { Usuario } from './tipos-api';
@@ -48,6 +49,7 @@ async function arrancar(): Promise<void> {
         }),
       ),
       [RUTA_LOGIN]: () => vistaLogin(api, { navegar }),
+      '#/capitulo/:id': (p) => protegida((u) => vistaCapitulo(api, u, p.id))(),
     },
     raiz,
   );

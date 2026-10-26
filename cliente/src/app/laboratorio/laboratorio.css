@@ -1,0 +1,62 @@
+/* Vista del laboratorio (#/capitulo/:id). Usa las variables de editor/estilos.css. */
+
+.app-lab { max-width: 1280px; margin: 0 auto; padding: 12px 16px 32px; }
+.cabecera-lab {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--borde);
+}
+.cabecera-lab h1 { font-size: 1.25rem; margin: 0; flex: 1 1 auto; }
+.enlace-volver { color: var(--acento); font-weight: 600; text-decoration: none; }
+.enlace-volver:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+.estado-guardado { font-size: 0.85rem; color: var(--tenue); }
+.estado-guardado.estado-pendiente, .estado-guardado.estado-guardando { color: var(--lab-b); font-weight: 600; }
+.estado-guardado.estado-sin-conexion, .estado-guardado.estado-sesion-vencida,
+.estado-guardado.estado-error, .estado-guardado.estado-cerrada { color: var(--eliminado); font-weight: 700; }
+
+.app-lab > .aviso, .app-lab > .error { margin: 8px 0 0; }
+.aviso-borrador .botones { margin-top: 6px; }
+.copiar-borrador { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.borrador-texto { width: 100%; font: inherit; font-size: 0.85rem; white-space: pre-wrap; }
+
+.disposicion-lab {
+  display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 16px; align-items: start; margin-top: 12px;
+}
+@media (max-width: 900px) { .disposicion-lab { grid-template-columns: minmax(0, 1fr); } }
+.panel-lab .aviso-estructura { margin: 0 0 10px; }
+
+/* Barra */
+.barra-lab {
+  display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center;
+  position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--fondo);
+}
+.barra-grupo { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.barra-lab button { padding: 4px 8px; }
+.barra-lab button:disabled { opacity: 0.5; cursor: not-allowed; }
+.barra-lab button.simbolo { min-width: 2rem; font-family: Georgia, serif; }
+.barra-lab button.marca-subindice, .barra-lab button.marca-superindice { font-family: Georgia, serif; }
+.grupo-referencias { position: relative; }
+.lista-referencias {
+  position: absolute; top: 100%; left: 0; z-index: 3; min-width: 18rem; max-height: 18rem; overflow: auto;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.lista-referencias button { text-align: left; border-color: transparent; }
+.lista-referencias button:hover { border-color: var(--acento); }
+
+/* Panel de nota al pie */
+.panel-nota {
+  margin-top: 10px; padding: 10px; background: var(--papel);
+  border: 1px solid var(--acento); border-radius: var(--radio);
+}
+.panel-nota h2 { font-size: 0.95rem; margin: 0 0 4px; }
+.editor.editor-nota { min-height: 6rem; padding: 10px 12px; margin: 6px 0; }
+
+/* Contenido especial protegido */
+.editor .bloque-especial {
+  font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--tenue);
+  background: #eceae5; border-radius: 4px; padding: 0 4px; white-space: pre-wrap; cursor: not-allowed;
+}
+.editor div.bloque-especial { display: block; padding: 4px 8px; margin: 6px 0; border-left: 3px solid var(--borde); }
+.editor .ProseMirror[contenteditable='false'] { cursor: default; }
