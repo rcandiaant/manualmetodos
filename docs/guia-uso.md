@@ -80,6 +80,37 @@ Los filtros (un laboratorio, solo conflictos, solo pendientes, solo cambios o so
 3. **Guardar versión final** la guarda en el servidor. Puede guardar varias veces; se conservan todas las versiones. Mientras edita, la plataforma guarda un borrador en el navegador y se lo ofrece si sale sin guardar. Si hay un borrador sin recuperar, **Componer versión final** le pregunta antes de descartarlo.
 4. **Exportar .tex** descarga el capítulo en LaTeX. Si el texto tiene caracteres que LaTeX no sabe escribir o referencias sin destino, la plataforma lo avisa antes de exportar.
 
+### Registro de cambios
+
+El **registro de cambios** reúne en una sola tabla todos los aportes de los laboratorios y lo que se decidió sobre cada uno. Sirve para preparar la reunión de revisión y para dejar constancia del proceso.
+
+- Se abre con el botón **Registro de cambios** de la lista de capítulos (todos los capítulos) o con **Registro de cambios de este capítulo** dentro de un capítulo.
+- Está disponible desde que se abre la consulta. En preparación muestra un aviso, porque todavía no hay aportes.
+- Con muchos capítulos tarda unos segundos: arriba se indica «Cargando N de M capítulos…». Si un capítulo no carga, el resto se muestra igual y aparece **Reintentar** para ese capítulo.
+
+**La tabla.** Cada fila es una sugerencia o un comentario, con estas columnas: capítulo, ubicación, original → propuesta, laboratorio, motivo, decisión, resuelto por, fecha y nota. Encima aparecen los totales de lo que está a la vista: cuántos aportes hay en cada estado y cuántos se derivaron a reunión.
+
+- Las etiquetas *formato*, *bloque insertado*, *bloque eliminado*, *bloque movido* y *comentario* indican qué tipo de cambio es.
+- En los comentarios, el texto marcado es aproximado.
+- Si un aporte se hizo sobre un trozo que ya no existe en la versión vigente del capítulo, la ubicación dice «Bloque no encontrado en la versión vigente». El aporte se muestra igual.
+- Las fechas están en hora de Chile.
+- Con muchas filas, la tabla muestra las primeras 500. **Mostrar más** agrega otras 500 y **Mostrar todas** las muestra todas.
+
+**Filtros.** Puede filtrar por capítulo, laboratorio, estado (pendiente, aceptada, rechazada, modificada, comentario abierto o resuelto), tipo (sugerencias, comentarios o ambos) y **Solo derivados a reunión**. Los filtros quedan en la dirección de la página, así que puede guardarla o compartirla con otro revisor.
+
+**Imprimir.** **Imprimir** prepara la tabla con los filtros que estén activos (todas las filas, no solo las 500 de la pantalla) y abre el cuadro de impresión del navegador. Para obtener un PDF, elija «Guardar como PDF» como impresora.
+
+- La hoja sale apaisada, con un título que dice qué filtros se usaron y la fecha.
+- Los encabezados de la tabla se repiten en cada página y ninguna fila queda cortada entre dos páginas.
+- Los botones, los filtros y la navegación no se imprimen.
+
+**Descargar CSV.** Descarga las filas filtradas en un archivo `registro-cambios-AAAAMMDD.csv`, que se abre directamente con Excel en español (con tildes y columnas separadas).
+
+**Descargar los .tex finales (.zip).** **Descargar todos los .tex finales (.zip)** junta en un solo archivo `manual-final-AAAAMMDD.zip` la última versión final guardada de cada capítulo.
+
+- Si algún capítulo todavía no tiene versión final, la plataforma lo avisa con la lista antes de descargar. Puede elegir **Descargar de todos modos** o **Cancelar**. Si descarga, el `.zip` incluye un archivo `FALTANTES.txt` con los capítulos que faltan.
+- Desde el registro de un solo capítulo, el botón dice **Descargar el .tex final de este capítulo (.zip)** y trae solo ese capítulo.
+
 ---
 
 ## Administrador
@@ -98,7 +129,7 @@ Una vez abierta la consulta ya no se pueden subir capítulos.
 - Las cuentas importadas son de laboratorio. Para el revisor, cambie los roles y pulse **Guardar roles**. Una persona puede tener varios roles.
 - **Desactivar** impide entrar. **Regenerar clave** entrega una clave nueva y cierra al instante todas las sesiones abiertas de esa cuenta; úselo, por ejemplo, si cambia el responsable de un laboratorio.
 
-El primer administrador lo crea el equipo técnico al instalar la plataforma.
+El primer administrador lo crea el equipo técnico al instalar la plataforma (ver la [guía de despliegue](despliegue.md)).
 
 ### Consulta
 

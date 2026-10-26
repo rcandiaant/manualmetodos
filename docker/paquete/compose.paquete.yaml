@@ -1,0 +1,43 @@
+# Validación local del paquete de producción (dist/paquete/manualmetodos, lo arma `npm run empaquetar`).
+# SOLO DESARROLLO. Se usa SIEMPRE junto a compose.yaml (las rutas relativas son desde la raíz del repo):
+#
+#   docker compose -f compose.yaml -f docker/paquete/compose.paquete.yaml up -d paquete
+#   cd cliente && HUMO_URL=http://localhost:8081 HUMO_SERVICIO_PHP=paquete \
+#     COMPOSE_FILE="compose.yaml;docker/paquete/compose.paquete.yaml" npm run humo
+#
+# ¡ATENCIÓN! Si otro stack de este proyecto corre desde OTRO clon o worktree (p. ej. la demo en :8080),
+# usar SIEMPRE `-p <otro-proyecto>` en todos los comandos (y HUMO_COMPOSE_PROYECTO / EMPAQUETAR_COMPOSE_PROYECTO
+# con el mismo nombre). Sin -p, el proyecto es `manualmetodos` y `up -d paquete` (depends_on: bd) puede
+# recrear el `bd` de esa demo con las rutas de este clon. Ejemplo aislado:
+#   docker compose -p manualmetodos-dep -f compose.yaml -f docker/paquete/compose.paquete.yaml up -d paquete
+#   (y el php de desarrollo de ese proyecto en otro puerto, con un override `ports: !override`).
+#
+# (COMPOSE_FILE separa con «;» en Windows y con «:» en Linux/macOS; también sirve COMPOSE_PATH_SEPARATOR.)
+# El contenedor monta el paquete como /var/www/app, con public/ como DocumentRoot (como en cPanel), en el
+# puerto 8081 y contra la misma base `bd` de desarrollo. `npm run empaquetar` vacía la carpeta sin borrarla,
+# así que el contenedor ve el paquete nuevo sin recrearlo.
+services:
+  paquete:
+    build: docker/php
+    profiles: ["paquete"]
+    volumes:
+      - ./dist/paquete/manualmetodos:/var/www/app
+      - ./docker/paquete/sitio-paquete.conf:/etc/apache2/sites-available/000-default.conf:ro
+    # var/sesiones fuera del paquete (en el hosting la crea PHP; aquí no ensucia dist/).
+    tmpfs:
+      - /var/www/app/var:mode=1777
+    working_dir: /var/www/app
+    ports:
+      - "8081:80"
+    # SOLO DESARROLLO — mismos valores que el servicio php de compose.yaml; sin .env en el paquete.
+    environment:
+      BD_HOST: bd
+      BD_NOMBRE: manual
+      BD_USUARIO: manual
+      BD_CLAVE: manual_dev
+      CLAVE_CIFRADO: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+      CLAVE_INDICE: YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=
+      COOKIE_SEGURA: "0"
+    depends_on:
+      bd:
+        condition: service_healthy

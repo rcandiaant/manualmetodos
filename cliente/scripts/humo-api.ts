@@ -5,6 +5,10 @@
  *   npm run humo
  * Variable opcional: HUMO_URL (por omisión http://localhost:8080). Solo se acepta localhost o
  * 127.0.0.1: el SQL de desarrollo va siempre a la base local de Docker.
+ * Variables opcionales para otro stack local (p. ej. el paquete de producción en :8081, ver
+ * docker/paquete/compose.paquete.yaml): HUMO_COMPOSE_PROYECTO (proyecto de Docker Compose, `-p`;
+ * por omisión el de compose.yaml) y HUMO_SERVICIO_PHP (servicio donde corre bin/crear-admin.php;
+ * por omisión `php`). Docker Compose respeta además COMPOSE_FILE.
  *
  * Recorre el flujo completo con las mismas funciones del cliente: `crearApi` (src/app/api.ts)
  * con un `fetch` inyectado que agrega la URL base, un frasco de cookies propio y la cabecera
@@ -99,8 +103,12 @@ function colaDelLog(carpeta: string, nombre: string): string {
   }
 }
 
+const COMPOSE_PROYECTO = process.env.HUMO_COMPOSE_PROYECTO?.trim() ?? '';
+const SERVICIO_PHP = process.env.HUMO_SERVICIO_PHP?.trim() || 'php';
+
 function docker(args: string[]): string {
-  const r = spawnSync('docker', ['compose', ...args], { cwd: RAIZ, encoding: 'utf8', timeout: 120_000 });
+  const proyecto = COMPOSE_PROYECTO ? ['-p', COMPOSE_PROYECTO] : [];
+  const r = spawnSync('docker', ['compose', ...proyecto, ...args], { cwd: RAIZ, encoding: 'utf8', timeout: 120_000 });
   if (r.error || r.status !== 0) {
     throw new FalloHumo(`docker compose ${args.slice(0, 3).join(' ')} … falló: ${r.error?.message ?? r.stderr}`);
   }
@@ -231,7 +239,7 @@ async function main(): Promise<void> {
 
   paso('1. El administrador (creado con bin/crear-admin.php) entra');
   const correoAdmin = `admin-${sello}@${dominio}`;
-  const salida = docker(['exec', '-T', 'php', 'php', 'bin/crear-admin.php', 'Admin Humo', correoAdmin, 'Administración']);
+  const salida = docker(['exec', '-T', SERVICIO_PHP, 'php', 'bin/crear-admin.php', 'Admin Humo', correoAdmin, 'Administración']);
   const claveAdmin = /Clave:\s+(\S+)/.exec(salida)?.[1];
   comprobar(claveAdmin, `bin/crear-admin.php creó ${correoAdmin}`);
   const admin = nuevoActor('Administrador');
@@ -469,6 +477,10 @@ async function main(): Promise<void> {
     await revisor.api.patch(`/comentarios/${c.id}/resolucion`, { estado: 'resuelto', notaResolucion: 'Visto en la revisión.' });
   }
   const aportes2 = await revisor.api.get<Aportes>(`/capitulos/${cap.id}/aportes`);
+  comprobar(
+    aportes2.sugerencias.every((s) => s.resueltoPorNombre === filas[3][0]) && aportes2.comentarios.every((c) => c.resueltoPorNombre === filas[3][0]),
+    `resueltoPorNombre es «${filas[3][0]}», el revisor de la prueba, en todas las sugerencias y comentarios`,
+  );
   const rechazadas = aportes2.sugerencias.filter((s) => s.estado === 'rechazada');
   comprobar(
     rechazadas.length === 1 && rechazadas[0].derivadaReunion === true && aportes2.comentarios.every((c) => c.estado === 'resuelto'),

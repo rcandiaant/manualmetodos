@@ -1,5 +1,10 @@
 Options -Indexes
 
+# La SPA (index.html, del build del cliente) es la portada. cPanel y la imagen php:apache prueban
+# index.php primero, y index.php es solo la API: sin esto, «/» respondería 404 en JSON.
+# El router de la SPA usa #hash, así que no hace falta otra regla de reescritura.
+DirectoryIndex index.html
+
 <IfModule mod_headers.c>
     # La API ya emite sus propias cabeceras desde PHP; evita duplicarlas.
     SetEnvIf Request_URI "^/api/" es_api
@@ -10,7 +15,8 @@ Options -Indexes
     Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on' && -z %{ENV:REDIRECT_es_api}"
 </IfModule>
 
-<FilesMatch "(\.(env|sql|lock)|^composer\.json)$">
+# .user.ini / php.ini: los crea el MultiPHP INI Editor de cPanel en esta carpeta; no deben leerse desde la web.
+<FilesMatch "(\.(env|sql|lock)|^composer\.json|^\.user\.ini|^php\.ini)$">
     Require all denied
 </FilesMatch>
 

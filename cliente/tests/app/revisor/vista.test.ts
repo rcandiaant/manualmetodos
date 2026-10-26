@@ -51,6 +51,8 @@ describe('vista del revisor', () => {
   it('muestra la base con las sugerencias por color y el panel por bloque', async () => {
     const raiz = await montar();
     expect(raiz.textContent).toContain('Capítulo 1');
+    const informe = raiz.querySelector<HTMLAnchorElement>('a[href="#/informe/3"]');
+    expect(informe?.textContent).toBe('Registro de cambios de este capítulo');
     // Documento base con las propuestas superpuestas, con la clase del laboratorio.
     const insertados = [...raiz.querySelectorAll<HTMLElement>('.editor .rev-insertado')];
     expect(insertados.map((n) => n.textContent)).toEqual(expect.arrayContaining(['43,0', '44,0', 'inicial', 'último', '10']));

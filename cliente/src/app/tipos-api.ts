@@ -102,6 +102,8 @@ export interface SugerenciaServidor extends Sugerencia {
   notaResolucion?: string | null;
   derivadaReunion?: boolean;
   resueltoPor?: number | null;
+  /** Nombre del revisor que resolvió; null si está pendiente. Solo en `…/aportes`. */
+  resueltoPorNombre?: string | null;
   resueltoEn?: FechaIso | null;
 }
 
@@ -145,6 +147,8 @@ export interface Comentario {
   usuarioId?: number;
   laboratorio?: string;
   resueltoPor?: number | null;
+  /** Nombre del revisor que resolvió; null si está abierto. Solo en `…/aportes`. */
+  resueltoPorNombre?: string | null;
   resueltoEn?: FechaIso | null;
 }
 

@@ -5,6 +5,7 @@ manual-fuente/
 .env
 .env.*
 !.env.example
+!.env.produccion.example
 
 # Dependencias y builds
 node_modules/

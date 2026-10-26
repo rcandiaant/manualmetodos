@@ -1,6 +1,6 @@
 /**
  * Arranque de la aplicación: recupera la sesión (`GET /sesion`) y define las rutas.
- * Las vistas del revisor y de administración se cargan por ruta (`import()`), para que el
+ * Las vistas del revisor, del registro de cambios y de administración se cargan por ruta (`import()`), para que el
  * laboratorio no descargue el importador LaTeX ni el panel de decisiones.
  */
 import 'katex/dist/katex.min.css';
@@ -9,7 +9,7 @@ import './app.css';
 import { crearApi } from './api';
 import { vistaInicio } from './inicio';
 import { vistaCapitulo } from './laboratorio/vista';
-import { definirRutas, navegar, RUTA_INICIO, vistaDiferida, type FabricaVista, type Vista } from './router';
+import { definirRutas, navegar, RUTA_INICIO, vistaDiferida, type FabricaVista, type Parametros, type Vista } from './router';
 import { iniciar, conCompuerta, manejarSinSesion, RUTA_LOGIN, salir, usuarioActual, vistaLogin } from './sesion';
 import type { Usuario } from './tipos-api';
 
@@ -45,6 +45,14 @@ function rutasAdminDiferidas(): Record<string, FabricaVista> {
   return tabla;
 }
 
+/** Registro de cambios (`#/informe` e `#/informe/:id`), solo para el revisor; se carga por ruta. */
+const rutaInforme: FabricaVista = (p: Parametros, q) =>
+  protegida((u) =>
+    vistaDiferida(async () =>
+      (await import('./informe/vista')).vistaInformeUsuario(api, u, p.id === undefined ? undefined : Number(p.id), q),
+    ),
+  )();
+
 async function arrancar(): Promise<void> {
   const raiz = document.getElementById('app') ?? document.body;
   try {
@@ -72,6 +80,8 @@ async function arrancar(): Promise<void> {
           vistaDiferida(async () => (await import('./revisor/vista')).vistaRevisor(api, Number(p.id), q, u.id)),
         )(),
       '#/capitulo/:id': (p) => protegida((u) => vistaCapitulo(api, u, p.id))(),
+      '#/informe': rutaInforme,
+      '#/informe/:id': rutaInforme,
     },
     raiz,
   );

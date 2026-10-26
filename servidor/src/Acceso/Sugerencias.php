@@ -149,8 +149,9 @@ final class Sugerencias
     {
         $st = $this->bd->prepare(
             'SELECT s.id AS fila, s.usuario_id, s.version_base_id, s.datos, s.motivo, s.estado, s.nota_resolucion,
-                    s.derivada_reunion, s.resuelto_por, s.resuelto_en, u.laboratorio
+                    s.derivada_reunion, s.resuelto_por, s.resuelto_en, u.laboratorio, r.nombre AS resuelto_por_nombre
              FROM sugerencias s JOIN usuarios u ON u.id = s.usuario_id
+             LEFT JOIN usuarios r ON r.id = s.resuelto_por
              WHERE s.capitulo_id = ? ORDER BY s.id'
         );
         $st->execute([$capituloId]);
@@ -169,6 +170,7 @@ final class Sugerencias
             $s->notaResolucion = $f['nota_resolucion'];
             $s->derivadaReunion = (bool) $f['derivada_reunion'];
             $s->resueltoPor = $f['resuelto_por'] === null ? null : (int) $f['resuelto_por'];
+            $s->resueltoPorNombre = $f['resuelto_por_nombre'];
             $s->resueltoEn = Consulta::iso(Consulta::desdeSql($f['resuelto_en']));
             $res[] = $s;
         }

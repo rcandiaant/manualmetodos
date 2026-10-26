@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build
       - name: Esquema del servidor al día
         run: npm run exportar-esquema && git diff --exit-code ../servidor/config/esquema-documento.json
       - run: npm audit --audit-level=high
