@@ -21,6 +21,7 @@
     "@unified-latex/unified-latex-util-parse": "^1.8.4",
     "@unified-latex/unified-latex-util-print-raw": "^1.8.4",
     "diff": "^9.0.0",
+    "fflate": "0.8.2",
     "katex": "^0.19.0",
     "mathlive": "0.111.1"
   },

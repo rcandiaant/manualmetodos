@@ -32,6 +32,7 @@ import {
   type FilaInforme,
   type FiltrosInforme,
 } from './datos';
+import type { ResultadoZip } from './zip';
 
 /** Peticiones simultáneas como máximo al cargar los capítulos. */
 export const LIMITE_PETICIONES = 4;
@@ -129,15 +130,14 @@ function fechaChile(d: Date): { legible: string; compacta: string } {
   return { legible: `${dia}-${m}-${a} ${hora}`, compacta: `${a}${m}${dia}` };
 }
 
-/** Descarga de texto como archivo: la técnica de `descargarTexto` (Blob + revocación diferida). */
-function descargarCsv(nombre: string, texto: string): void {
-  const url = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' }));
+/** Descarga como archivo: Blob + URL con revocación diferida (revocar en el acto puede cortarla). */
+function descargarArchivo(nombre: string, parte: BlobPart, tipo: string): void {
+  const url = URL.createObjectURL(new Blob([parte], { type: tipo }));
   const a = el('a', { href: url, download: nombre });
   a.hidden = true;
   document.body.append(a);
   a.click();
   a.remove();
-  // Revocar en el acto puede cortar la descarga en algunos navegadores.
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -256,9 +256,13 @@ export function vistaInforme(
       const barra = el('div', { class: 'filtros-informe no-imprimir', hidden: '' });
       const bImprimir = boton('Imprimir', () => void alImprimir(), 'primario');
       const bCsv = boton('Descargar CSV', () => alDescargar());
+      const etiquetaZip = fijo ? 'Descargar el .tex final de este capítulo (.zip)' : 'Descargar todos los .tex finales (.zip)';
+      const bZip = boton(etiquetaZip, () => void alDescargarZip());
       bImprimir.disabled = true;
       bCsv.disabled = true;
-      const acciones = el('div', { class: 'acciones-informe no-imprimir' }, bImprimir, bCsv);
+      bZip.disabled = true;
+      const acciones = el('div', { class: 'acciones-informe no-imprimir' }, bImprimir, bCsv, bZip);
+      const avisoZip = el('div', { class: 'error aviso-zip no-imprimir', role: 'alert', hidden: '' });
       const tbody = el('tbody');
       const tabla = el(
         'table',
@@ -286,6 +290,7 @@ export function vistaInforme(
           ayuda,
           barra,
           acciones,
+          avisoZip,
           tituloImpreso,
           contadores,
           tabla,
@@ -397,9 +402,63 @@ export function vistaInforme(
 
       function alDescargar(): void {
         try {
-          descargarCsv(`registro-cambios-${fechaChile(ahora()).compacta}.csv`, csvInforme(filtradas));
+          descargarArchivo(`registro-cambios-${fechaChile(ahora()).compacta}.csv`, csvInforme(filtradas), 'text/csv;charset=utf-8');
         } catch (e) {
           mostrarError(`No se pudo descargar el CSV: ${mensajeDe(e)}`);
+        }
+      }
+
+      // --- Descarga de los .tex finales (.zip) ---
+
+      const nombreZip = () => `manual-final-${fechaChile(ahora()).compacta}.zip`;
+      const cerrarAviso = () => {
+        avisoZip.hidden = true;
+        avisoZip.replaceChildren();
+        bZip.disabled = false;
+      };
+      const bajarZip = (r: ResultadoZip) => {
+        cerrarAviso();
+        // Copia a un ArrayBuffer propio: `BlobPart` no acepta vistas sobre `ArrayBufferLike`.
+        descargarArchivo(nombreZip(), r.zip.slice().buffer, 'application/zip');
+      };
+
+      async function alDescargarZip(): Promise<void> {
+        bZip.disabled = true;
+        const texto = bZip.textContent;
+        bZip.textContent = 'Preparando el .zip…';
+        avisoZip.hidden = true;
+        try {
+          const { armarZipFinales } = await import('./zip');
+          const r = await armarZipFinales(api, objetivo);
+          if (!vigente) return;
+          if (r.faltantes.length === 0) {
+            bajarZip(r);
+            return;
+          }
+          const lista = el('ul');
+          for (const t of r.faltantes) lista.append(el('li', {}, t));
+          avisoZip.replaceChildren(
+            el(
+              'p',
+              {},
+              r.faltantes.length === 1
+                ? 'Este capítulo no tiene versión final guardada y no estará en el .zip:'
+                : `Estos ${r.faltantes.length} capítulos no tienen versión final guardada y no estarán en el .zip:`,
+            ),
+            lista,
+            el('p', {}, 'El .zip incluirá un archivo FALTANTES.txt con esta lista.'),
+            boton('Descargar de todos modos', () => bajarZip(r), 'primario'),
+            ' ',
+            boton('Cancelar', cerrarAviso),
+          );
+          avisoZip.hidden = false;
+        } catch (e) {
+          if (!vigente) return;
+          avisoZip.replaceChildren(`No se pudo preparar el .zip: ${mensajeError(e)}`);
+          avisoZip.hidden = false;
+        } finally {
+          bZip.textContent = texto;
+          bZip.disabled = !avisoZip.hidden && avisoZip.querySelector('button') !== null; // aviso pendiente: se decide ahí
         }
       }
 
@@ -550,6 +609,7 @@ export function vistaInforme(
         redibujar();
         bImprimir.disabled = false;
         bCsv.disabled = false;
+        bZip.disabled = false;
       }
 
       async function reintentar(): Promise<void> {
