@@ -1,0 +1,54 @@
+/* Estilos de la aplicación (login, inicio). Usa las variables de editor/estilos.css. */
+
+.app { max-width: 880px; margin: 0 auto; padding: 16px; }
+.app h1 { font-size: 1.4rem; margin: 0; }
+.app h2 { font-size: 1.1rem; margin: 20px 0 8px; }
+
+.cabecera-app {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--borde);
+}
+.cabecera-acciones { display: flex; gap: 8px; align-items: center; }
+
+.enlace-boton, .app button {
+  display: inline-block; padding: 6px 12px; border: 1px solid var(--acento); border-radius: var(--radio);
+  background: var(--papel); color: var(--acento); font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.app button.primario { background: var(--acento); color: #fff; }
+.app button:disabled { opacity: 0.6; cursor: progress; }
+.enlace-boton:focus-visible, .app button:focus-visible, .app input:focus-visible {
+  outline: 2px solid var(--acento); outline-offset: 2px;
+}
+
+/* Login */
+.app-login { max-width: 420px; padding-top: 10vh; }
+.login { display: grid; gap: 6px; margin-top: 16px; }
+.login label { font-weight: 600; font-size: 0.9rem; margin-top: 6px; }
+.login input { font: inherit; padding: 8px; border: 1px solid var(--borde); border-radius: 4px; }
+.login .error { margin: 6px 0 0; }
+.login button { margin-top: 10px; }
+.ayuda { color: var(--tenue); font-size: 0.85rem; }
+/* Honeypot: fuera de pantalla, pero presente en el DOM (no type=hidden). */
+.trampa { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+
+/* Inicio */
+.banner-etapa {
+  margin-top: 12px; padding: 10px 14px; border-radius: var(--radio);
+  background: var(--papel); border: 1px solid var(--borde); border-left: 4px solid var(--tenue);
+}
+.banner-etapa.etapa-consulta { border-left-color: var(--insertado); background: var(--insertado-fondo); }
+.banner-etapa.etapa-edicion_final { border-left-color: var(--lab-b); background: var(--lab-b-fondo); }
+.capitulos { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.capitulo {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
+  padding: 10px 14px; background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio);
+}
+.capitulo-titulo { font-weight: 600; }
+.capitulo-titulo .orden { color: var(--tenue); }
+.capitulo-datos { grid-column: 1; color: var(--tenue); font-size: 0.85rem; }
+.capitulo-acciones { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 8px; }
+.capitulos .vacio { color: var(--tenue); padding: 8px 0; }
+@media (max-width: 600px) {
+  .capitulo { grid-template-columns: 1fr; }
+  .capitulo-acciones { grid-column: 1; grid-row: auto; }
+}

@@ -1,37 +1,56 @@
 /**
- * Arranque de la aplicación. Por ahora (Task 1) solo comprueba el servidor con
- * `GET /api/salud`; la sesión y las vistas reales llegan en las tareas siguientes.
+ * Arranque de la aplicación: recupera la sesión (`GET /sesion`) y define las rutas.
+ * Las vistas de capítulo, revisión y administración llegan en las tareas siguientes.
  */
 import 'katex/dist/katex.min.css';
 import '../editor/estilos.css';
-import { el, mensajeDe } from '../editor/ui';
+import './app.css';
 import { crearApi } from './api';
-import { definirRutas, type Vista } from './router';
-import type { Salud } from './tipos-api';
+import { vistaInicio } from './inicio';
+import { definirRutas, navegar, RUTA_INICIO, type Vista } from './router';
+import { iniciar, conCompuerta, manejarSinSesion, RUTA_LOGIN, salir, usuarioActual, vistaLogin } from './sesion';
+import type { Usuario } from './tipos-api';
 
-const api = crearApi({ alSinSesion: () => {} });
+const alSinSesion = manejarSinSesion((hash) => navegar(hash));
+const compuerta = conCompuerta(alSinSesion);
+const api = crearApi({ alSinSesion: compuerta.handler });
 
-function vistaSalud(): Vista {
-  let vigente = true;
-  return {
-    montar(raiz) {
-      const estado = el('p', { id: 'estado-servidor' }, 'Comprobando el servidor…');
-      raiz.append(el('main', { class: 'app' }, el('h1', {}, 'Manual de métodos'), estado));
-      api
-        .get<Salud>('/salud')
-        .then((r) => {
-          if (vigente) estado.textContent = r.estado;
-        })
-        .catch((e: unknown) => {
-          if (!vigente) return;
-          estado.setAttribute('role', 'alert');
-          estado.textContent = `Sin conexión con el servidor: ${mensajeDe(e)}`;
-        });
-    },
-    desmontar() {
-      vigente = false;
-    },
+/** Vista protegida: sin sesión, guarda la ruta pedida y va al login. */
+function protegida(fabrica: (u: Usuario) => Vista): () => Vista {
+  return () => {
+    const u = usuarioActual();
+    if (!u) {
+      alSinSesion();
+      return { montar() {}, desmontar() {} };
+    }
+    return fabrica(u);
   };
 }
 
-definirRutas({ '#/capitulos': vistaSalud });
+async function arrancar(): Promise<void> {
+  const raiz = document.getElementById('app') ?? document.body;
+  try {
+    await iniciar(api);
+  } catch {
+    // Sin conexión al arrancar: se muestra el login; el aviso de red sale al intentar entrar.
+  }
+  // Las rutas se definen después del boot; si no hay sesión, la vista protegida lleva al login
+  // recordando la ruta pedida.
+  compuerta.abrir();
+  definirRutas(
+    {
+      [RUTA_INICIO]: protegida((u) =>
+        vistaInicio(api, u, {
+          salir: async () => {
+            await salir(api);
+            await navegar(RUTA_LOGIN);
+          },
+        }),
+      ),
+      [RUTA_LOGIN]: () => vistaLogin(api, { navegar }),
+    },
+    raiz,
+  );
+}
+
+void arrancar();

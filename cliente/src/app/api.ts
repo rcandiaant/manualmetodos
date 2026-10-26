@@ -17,6 +17,8 @@ export class ErrorApi extends Error {
   readonly estado: number;
   readonly codigo: string;
   readonly campos?: Record<string, string>;
+  /** Segundos de la cabecera `Retry-After` (429 `demasiados_intentos`), si venía. */
+  esperaSegundos?: number;
 
   constructor(estado: number, codigo: string, mensaje: string, campos?: Record<string, string>) {
     super(mensaje);
@@ -66,6 +68,13 @@ export function esNoModificado(x: unknown): x is NoModificado {
   return typeof x === 'object' && x !== null && (x as NoModificado).noModificado === true;
 }
 
+/** Copia `Retry-After` (segundos) al error, aunque el cuerpo no sea el JSON del contrato (p. ej. un 429 de proxy). */
+function conEspera(error: ErrorApi, r: Response): ErrorApi {
+  const cabecera = r.headers.get('Retry-After');
+  if (cabecera && Number.isFinite(Number(cabecera)) && Number(cabecera) >= 0) error.esperaSegundos = Number(cabecera);
+  return error;
+}
+
 /** Arma el `ErrorApi` de una respuesta fallida; si el cuerpo no es el JSON del contrato, `error_interno`. */
 async function errorDeRespuesta(r: Response): Promise<ErrorApi> {
   let datos: unknown = null;
@@ -79,9 +88,12 @@ async function errorDeRespuesta(r: Response): Promise<ErrorApi> {
     const mensaje = typeof e.mensaje === 'string' && e.mensaje ? e.mensaje : `Error ${r.status}.`;
     const campos =
       e.campos && typeof e.campos === 'object' ? (e.campos as Record<string, string>) : undefined;
-    return new ErrorApi(r.status, e.codigo, mensaje, campos);
+    return conEspera(new ErrorApi(r.status, e.codigo, mensaje, campos), r);
   }
-  return new ErrorApi(r.status, 'error_interno', `El servidor respondió con un error inesperado (HTTP ${r.status}).`);
+  return conEspera(
+    new ErrorApi(r.status, 'error_interno', `El servidor respondió con un error inesperado (HTTP ${r.status}).`),
+    r,
+  );
 }
 
 export function crearApi(opciones: OpcionesApi): Api {
