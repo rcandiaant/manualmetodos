@@ -6,6 +6,7 @@ import 'katex/dist/katex.min.css';
 import '../editor/estilos.css';
 import './app.css';
 import { crearApi } from './api';
+import { rutasAdmin } from './admin/rutas';
 import { vistaInicio } from './inicio';
 import { definirRutas, navegar, RUTA_INICIO, type Vista } from './router';
 import { iniciar, conCompuerta, manejarSinSesion, RUTA_LOGIN, salir, usuarioActual, vistaLogin } from './sesion';
@@ -47,6 +48,7 @@ async function arrancar(): Promise<void> {
           },
         }),
       ),
+      ...rutasAdmin(api, protegida),
       [RUTA_LOGIN]: () => vistaLogin(api, { navegar }),
     },
     raiz,
