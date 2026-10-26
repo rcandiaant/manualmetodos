@@ -15,7 +15,8 @@ DirectoryIndex index.html
     Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on' && -z %{ENV:REDIRECT_es_api}"
 </IfModule>
 
-<FilesMatch "(\.(env|sql|lock)|^composer\.json)$">
+# .user.ini / php.ini: los crea el MultiPHP INI Editor de cPanel en esta carpeta; no deben leerse desde la web.
+<FilesMatch "(\.(env|sql|lock)|^composer\.json|^\.user\.ini|^php\.ini)$">
     Require all denied
 </FilesMatch>
 
