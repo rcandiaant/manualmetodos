@@ -7,6 +7,7 @@
  */
 import { boton, el } from '../../editor/ui';
 import { ErrorApi, type Api } from '../api';
+import { celdaCsv } from '../csv';
 import type { Vista } from '../router';
 import type { ClaveRegenerada, CuentaImportada, Rol, UsuarioAdmin, UsuarioCambio } from '../tipos-api';
 import { cabeceraAdmin, cajaError, mensajeError, mostrar } from './comun';
@@ -32,12 +33,6 @@ export function lineasDeCsv(mensaje: string): string[] {
   }
   return res;
 }
-
-/** Celda CSV: antepone `'` si empieza como fórmula de planilla y entrecomilla si hace falta. */
-const celdaCsv = (v: string): string => {
-  const seguro = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-  return /[",;\r\n]/.test(seguro) ? `"${seguro.replace(/"/g, '""')}"` : seguro;
-};
 
 /** Filas de datos no vacías del CSV (sin contar el encabezado); aproximado, para el tope de 100. */
 function contarFilas(csv: string): number {

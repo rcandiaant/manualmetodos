@@ -103,6 +103,8 @@ export interface SugerenciaServidor extends Sugerencia {
   derivadaReunion?: boolean;
   resueltoPor?: number | null;
   resueltoEn?: FechaIso | null;
+  /** Solo en `…/aportes` (revisor): `nombre` del revisor que resolvió; null si está pendiente. */
+  resueltoPorNombre?: string | null;
 }
 
 export type Copia =
@@ -146,6 +148,8 @@ export interface Comentario {
   laboratorio?: string;
   resueltoPor?: number | null;
   resueltoEn?: FechaIso | null;
+  /** Solo en `…/aportes` (revisor): `nombre` del revisor que resolvió; null si está abierto. */
+  resueltoPorNombre?: string | null;
 }
 
 export interface ComentarioEntrada {
