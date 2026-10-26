@@ -91,8 +91,9 @@ final class Comentarios
     public function todosDelCapitulo(int $capituloId): array
     {
         $st = $this->bd->prepare(
-            'SELECT c.id, c.usuario_id, c.bloque_id, c.rango, c.texto, c.estado, c.nota_resolucion, c.resuelto_por, c.resuelto_en, c.creado, u.laboratorio
-             FROM comentarios c JOIN usuarios u ON u.id = c.usuario_id WHERE c.capitulo_id = ? ORDER BY c.id'
+            'SELECT c.id, c.usuario_id, c.bloque_id, c.rango, c.texto, c.estado, c.nota_resolucion, c.resuelto_por, c.resuelto_en, c.creado, u.laboratorio, r.nombre AS resuelto_por_nombre
+             FROM comentarios c JOIN usuarios u ON u.id = c.usuario_id
+             LEFT JOIN usuarios r ON r.id = c.resuelto_por WHERE c.capitulo_id = ? ORDER BY c.id'
         );
         $st->execute([$capituloId]);
         return array_map(fn (array $f): array => [
@@ -105,6 +106,7 @@ final class Comentarios
             'estado' => $f['estado'],
             'notaResolucion' => $f['nota_resolucion'],
             'resueltoPor' => $f['resuelto_por'] === null ? null : (int) $f['resuelto_por'],
+            'resueltoPorNombre' => $f['resuelto_por_nombre'],
             'resueltoEn' => Consulta::iso(Consulta::desdeSql($f['resuelto_en'])),
             'creado' => Consulta::iso(Consulta::desdeSql($f['creado'])),
         ], $st->fetchAll());

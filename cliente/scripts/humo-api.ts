@@ -5,6 +5,7 @@
  *   npm run humo
  * Variable opcional: HUMO_URL (por omisión http://localhost:8080). Solo se acepta localhost o
  * 127.0.0.1: el SQL de desarrollo va siempre a la base local de Docker.
+ * Variable opcional: HUMO_COMPOSE_PROYECTO (nombre del proyecto de docker compose, `-p`; por omisión el de compose.yaml).
  *
  * Recorre el flujo completo con las mismas funciones del cliente: `crearApi` (src/app/api.ts)
  * con un `fetch` inyectado que agrega la URL base, un frasco de cookies propio y la cabecera
@@ -100,7 +101,9 @@ function colaDelLog(carpeta: string, nombre: string): string {
 }
 
 function docker(args: string[]): string {
-  const r = spawnSync('docker', ['compose', ...args], { cwd: RAIZ, encoding: 'utf8', timeout: 120_000 });
+  const proyecto = process.env.HUMO_COMPOSE_PROYECTO;
+  const base = proyecto ? ['-p', proyecto] : [];
+  const r = spawnSync('docker', ['compose', ...base, ...args], { cwd: RAIZ, encoding: 'utf8', timeout: 120_000 });
   if (r.error || r.status !== 0) {
     throw new FalloHumo(`docker compose ${args.slice(0, 3).join(' ')} … falló: ${r.error?.message ?? r.stderr}`);
   }
@@ -469,6 +472,10 @@ async function main(): Promise<void> {
     await revisor.api.patch(`/comentarios/${c.id}/resolucion`, { estado: 'resuelto', notaResolucion: 'Visto en la revisión.' });
   }
   const aportes2 = await revisor.api.get<Aportes>(`/capitulos/${cap.id}/aportes`);
+  comprobar(
+    aportes2.sugerencias.every((s) => s.resueltoPorNombre === filas[3][0]) && aportes2.comentarios.every((c) => c.resueltoPorNombre === filas[3][0]),
+    `resueltoPorNombre es «${filas[3][0]}», el revisor de la prueba, en todas las sugerencias y comentarios`,
+  );
   const rechazadas = aportes2.sugerencias.filter((s) => s.estado === 'rechazada');
   comprobar(
     rechazadas.length === 1 && rechazadas[0].derivadaReunion === true && aportes2.comentarios.every((c) => c.estado === 'resuelto'),

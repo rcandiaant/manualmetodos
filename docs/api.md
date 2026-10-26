@@ -277,8 +277,9 @@ Cada sugerencia es el objeto del cliente más estos campos:
 | `usuarioId`, `laboratorio` | el autor |
 | `versionId` | la versión base de la sugerencia |
 | `estado`, `notaResolucion`, `derivadaReunion`, `resueltoPor`, `resueltoEn` | la resolución |
+| `resueltoPorNombre` | `string \| null`: el `nombre` del usuario revisor que resolvió; `null` si está pendiente |
 
-Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, notaResolucion, resueltoPor, resueltoEn, creado}`.
+Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, notaResolucion, resueltoPor, resueltoPorNombre, resueltoEn, creado}`. `resueltoPorNombre` es `string | null`: el `nombre` del revisor que resolvió; `null` si está abierto. `mis-aportes` no expone `resueltoPor` ni `resueltoPorNombre`.
 
 **`PATCH /sugerencias/{id}`** (`{id}` = `sugerenciaId`) con `{"estado": "aceptada", "notaResolucion": "…", "derivadaReunion": true}`:
 - `estado` es obligatorio y uno de `pendiente`, `aceptada`, `rechazada` o `modificada`.

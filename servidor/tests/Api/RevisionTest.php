@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Manual\Pruebas\Api;
 
 use Manual\Pruebas\Soporte\BaseDePruebas;
+use Manual\Pruebas\Soporte\ClienteApi;
 use Manual\Pruebas\Soporte\EscenarioRevision;
 use PHPUnit\Framework\TestCase;
 
@@ -63,6 +64,53 @@ final class RevisionTest extends TestCase
             self::assertSame('Comentario a', $c[0]['texto']);
             self::assertSame('Laboratorio Sur', $c[1]['laboratorio']);
         }
+    }
+
+    public function test_aportes_incluye_resueltoPorNombre_del_revisor(): void
+    {
+        $this->cerrarConsulta();
+        $ana = (new ClienteApi($this->app))->comoUsuario(
+            $this->crearUsuario(['nombre' => 'Ana Revisora', 'roles' => ['revisor'], 'laboratorio' => 'Comité revisor'])
+        );
+        self::assertSame(200, $ana->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'aceptada'])->estado);
+        self::assertSame(200, $ana->patch("/comentarios/{$this->comIds[0]}/resolucion", ['estado' => 'resuelto'])->estado);
+
+        $d = json_decode($this->revisor->get("/capitulos/{$this->cap}/aportes")->cuerpo(), true);
+        self::assertSame('Ana Revisora', $d['sugerencias'][0]['resueltoPorNombre']);
+        self::assertSame('Ana Revisora', $d['comentarios'][0]['resueltoPorNombre']);
+    }
+
+    public function test_pendiente_y_abierto_tienen_resueltoPorNombre_null(): void
+    {
+        $d = json_decode($this->revisor->get("/capitulos/{$this->cap}/aportes")->cuerpo(), true);
+        foreach ($d['sugerencias'] as $s) {
+            self::assertArrayHasKey('resueltoPorNombre', $s);
+            self::assertNull($s['resueltoPorNombre']);
+        }
+        foreach ($d['comentarios'] as $c) {
+            self::assertArrayHasKey('resueltoPorNombre', $c);
+            self::assertNull($c['resueltoPorNombre']);
+        }
+        // Reabrir también lo deja en null.
+        $this->cerrarConsulta();
+        $this->revisor->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'aceptada']);
+        $this->revisor->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'pendiente']);
+        $d = json_decode($this->revisor->get("/capitulos/{$this->cap}/aportes")->cuerpo(), true);
+        self::assertNull($d['sugerencias'][0]['resueltoPorNombre']);
+    }
+
+    public function test_mis_aportes_no_expone_resueltoPorNombre_ni_resueltoPor(): void
+    {
+        $this->cerrarConsulta();
+        $this->revisor->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'aceptada']);
+        $this->revisor->patch("/comentarios/{$this->comIds[0]}/resolucion", ['estado' => 'resuelto']);
+        $r = $this->lab->get("/capitulos/{$this->cap}/mis-aportes");
+        $d = json_decode($r->cuerpo(), true);
+        foreach (['sugerencias', 'comentarios'] as $k) {
+            self::assertArrayNotHasKey('resueltoPorNombre', $d[$k][0]);
+            self::assertArrayNotHasKey('resueltoPor', $d[$k][0]);
+        }
+        self::assertStringNotContainsString('resueltoPor', $r->cuerpo());
     }
 
     public function test_aportes_exige_revisor_etapa_y_capitulo(): void
