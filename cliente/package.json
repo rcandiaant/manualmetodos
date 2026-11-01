@@ -17,7 +17,7 @@
   "dependencies": {
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-text": "^3.32.0",
-    "@tiptap/pm": "^3.32.0",
+    "@tiptap/pm": "^3.32.1",
     "@unified-latex/unified-latex-types": "^1.8.4",
     "@unified-latex/unified-latex-util-parse": "^1.8.4",
     "@unified-latex/unified-latex-util-print-raw": "^1.8.4",
