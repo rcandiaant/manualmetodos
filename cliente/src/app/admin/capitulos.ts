@@ -1,10 +1,11 @@
 /**
  * Administración de capítulos (`#/admin/capitulos`): importa un `.tex` en el navegador,
  * muestra una vista previa con avisos y bloques `especial`, y lo sube con
- * `POST /admin/capitulos` (solo en preparación; docs/api.md §4.6).
+ * `POST /admin/capitulos` en cualquier etapa (docs/api.md §4.6). Si el slug ya existe, la subida
+ * reemplaza el texto de ese capítulo, y el servidor lo rechaza (409) si ya tiene aportes.
  *
  * También lista los capítulos subidos: el orden y el título se editan en cualquier etapa
- * (`PATCH /admin/capitulos/{id}`) y un capítulo sin aportes se borra solo en preparación
+ * (`PATCH /admin/capitulos/{id}`) y un capítulo sin aportes se borra en cualquier etapa
  * (`DELETE /admin/capitulos/{id}`), con una confirmación en la página.
  */
 import { boton, el } from '../../editor/ui';
@@ -51,7 +52,6 @@ export function especialesDe(doc: DocJSON): string[] {
 const recorte = (s: string, max = 160): string => (s.length > max ? `${s.slice(0, max)}…` : s);
 
 const MAX_ORDEN = 100000;
-export const TITULO_BORRAR_BLOQUEADO = 'Solo se pueden borrar capítulos antes de abrir la consulta';
 
 /** Orden de la lista: por `orden` y, a igualdad, por `id` (como `GET /capitulos`). */
 const porOrden = (a: CapituloLista, b: CapituloLista): number => a.orden - b.orden || a.id - b.id;
@@ -79,7 +79,6 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
   let vigente = true;
   let listo: Promise<void> = Promise.resolve();
   let etapa: Consulta['etapa'] | null = null;
-  let etapaFallida = false;
   let tex = '';
   let doc: DocJSON | null = null;
   let subiendo = false;
@@ -90,7 +89,8 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
 
   const errores = cajaError();
   const exito = el('div', { class: 'exito', role: 'status', hidden: '' });
-  const bloqueo = el('div', { class: 'bloqueo', hidden: '' });
+  const notaEtapa = el('p', { class: 'ayuda nota-etapa-capitulos', hidden: '' });
+  const avisoReemplazo = el('div', { class: 'aviso-reemplazo', role: 'status', hidden: '' });
   const previa = el('section', { class: 'vista-previa', hidden: '' });
   const formulario = el('div', { class: 'formulario', hidden: '' });
   const entradaSlug = el('input', { name: 'slug', type: 'text', maxlength: '80', required: '' });
@@ -156,7 +156,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
       recordar();
       void guardar(c);
     });
-    const preparacion = etapa === 'preparacion';
+    // Se puede borrar en cualquier etapa; si el capítulo tiene aportes, el servidor responde 409 y se muestra su mensaje.
     const btnBorrar = boton(
       'Borrar',
       () => {
@@ -166,15 +166,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
         cuerpoLista.querySelector<HTMLButtonElement>('.confirmar .cancelar')?.focus();
       },
       'borrar-capitulo',
-      preparacion
-        ? undefined
-        : etapa !== null
-          ? TITULO_BORRAR_BLOQUEADO
-          : etapaFallida
-            ? 'No se pudo saber la etapa de la consulta; recargue la página'
-            : 'Cargando la etapa de la consulta…',
     );
-    btnBorrar.disabled = !preparacion;
     const acciones = el('div', { class: 'acciones' }, btnGuardar, btnBorrar);
     const fila = el(
       'tr',
@@ -229,6 +221,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
       if (!c || c.orden !== b.baseOrden || c.titulo !== b.baseTitulo) borradores.delete(id);
     }
     dibujarLista();
+    actualizarBloqueo(); // el aviso de reemplazo depende de los slugs existentes
   }
 
   async function hacerGuardado(c: CapituloLista): Promise<void> {
@@ -279,7 +272,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
   }
 
   async function hacerBorrado(c: CapituloLista): Promise<void> {
-    if (operando || etapa !== 'preparacion') return;
+    if (operando) return;
     mostrar(erroresLista, null);
     estadoLista.hidden = true;
     operando = true;
@@ -295,7 +288,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
       if (!vigente) return;
       confirmando = null;
       dibujarLista();
-      // Un 409 (aportes o etapa) trae del servidor la explicación concreta.
+      // Un 409 (aportes) trae del servidor la explicación concreta.
       mostrar(erroresLista, e instanceof ErrorApi && e.estado === 409 ? e.message : mensajeError(e));
     } finally {
       operando = false;
@@ -307,17 +300,27 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
     return listo;
   }
 
+  /** El capítulo que la subida reemplazaría (mismo slug), o undefined si es uno nuevo. */
+  const existente = (): CapituloLista | undefined => capitulos.find((c) => c.slug === entradaSlug.value.trim());
+
+  /** Botón Subir, aviso de reemplazo y nota de la etapa (solo informativa: no bloquea nada). */
   function actualizarBloqueo(): void {
-    const abierto = etapa === 'preparacion';
-    btnSubir.disabled = !abierto || doc === null || subiendo;
-    if (etapa !== null && !abierto) {
-      bloqueo.textContent =
-        'No se puede subir: solo se pueden subir capítulos en la etapa de preparación. ' +
-        (etapa === 'consulta'
-          ? 'La consulta ya está abierta y los laboratorios trabajan sobre la base actual.'
-          : 'La consulta ya cerró y estamos en edición final.');
-      bloqueo.hidden = false;
-    } else bloqueo.hidden = true;
+    btnSubir.disabled = doc === null || subiendo;
+    const otro = doc === null ? undefined : existente();
+    btnSubir.textContent = otro ? 'Subir y reemplazar' : 'Subir';
+    if (otro) {
+      avisoReemplazo.textContent =
+        `Ya existe un capítulo con el slug «${otro.slug}»: la subida reemplazará el texto de "${otro.titulo}". ` +
+        'Solo es posible si ningún laboratorio trabajó en él todavía.';
+      avisoReemplazo.hidden = false;
+    } else avisoReemplazo.hidden = true;
+    if (etapa === 'consulta' || etapa === 'edicion_final') {
+      notaEtapa.textContent =
+        etapa === 'consulta'
+          ? 'La consulta está abierta: un capítulo nuevo queda disponible para los laboratorios apenas se sube.'
+          : 'La consulta ya cerró (edición final): un capítulo nuevo queda disponible para el revisor, sin aportes de laboratorios.';
+      notaEtapa.hidden = false;
+    } else notaEtapa.hidden = true;
   }
 
   function limpiarCampos(): void {
@@ -372,7 +375,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
   }
 
   async function hacerSubida(): Promise<void> {
-    if (!doc || etapa !== 'preparacion' || subiendo) return;
+    if (!doc || subiendo) return;
     mostrar(errores, null);
     exito.hidden = true;
     limpiarCampos();
@@ -418,8 +421,9 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
           }
         }
         if (!alguno) mostrar(errores, mensajeError(e));
-      } else if (e instanceof ErrorApi && e.estado === 409 && e.codigo === 'etapa_no_permite') {
-        mostrar(errores, 'No se puede subir: solo se pueden subir capítulos en la etapa de preparación.');
+      } else if (e instanceof ErrorApi && e.estado === 409) {
+        // p. ej. «N laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto.»
+        mostrar(errores, e.message);
       } else mostrar(errores, mensajeError(e));
     } finally {
       subiendo = false;
@@ -447,6 +451,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
           (e: unknown) => vigente && mostrar(errores, mensajeError(e)),
         );
       });
+      entradaSlug.addEventListener('input', actualizarBloqueo);
       formulario.append(
         el('label', { for: 'cap-slug' }, 'Slug'),
         entradaSlug,
@@ -459,6 +464,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
         errorOrden,
         errorDoc,
         errorTex,
+        avisoReemplazo,
         btnSubir,
       );
       entradaSlug.id = 'cap-slug';
@@ -476,7 +482,7 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
             el(
               'p',
               { class: 'ayuda' },
-              'El orden y el título se pueden cambiar en cualquier etapa (Guardar o Enter). Borrar solo es posible antes de abrir la consulta y si el capítulo no tiene aportes.',
+              'El orden y el título se pueden cambiar en cualquier etapa (Guardar o Enter). Un capítulo se puede borrar en cualquier etapa mientras no tenga aportes de laboratorios ni versión final.',
             ),
             erroresLista,
             estadoLista,
@@ -491,13 +497,13 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
           el(
             'p',
             { class: 'ayuda' },
-            'Elija el archivo .tex de un capítulo. Se importa en este navegador y se revisa antes de subirlo. Para reemplazar el .tex de un capítulo, súbalo de nuevo con el mismo slug.',
+            'Elija el archivo .tex de un capítulo. Se importa en este navegador y se revisa antes de subirlo. Se puede subir en cualquier etapa. Para reemplazar el texto de un capítulo, súbalo de nuevo con el mismo slug: solo es posible si ningún laboratorio trabajó en él.',
           ),
           el('label', { for: 'archivo-tex' }, 'Archivo .tex'),
           archivo,
           errores,
           exito,
-          bloqueo,
+          notaEtapa,
           previa,
           formulario,
         ),
@@ -507,13 +513,9 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
           if (!vigente) return;
           etapa = c.etapa;
           actualizarBloqueo();
-          dibujarLista(); // el botón Borrar depende de la etapa
         },
         (e: unknown) => {
-          if (!vigente) return;
-          etapaFallida = true;
-          mostrar(errores, mensajeError(e));
-          dibujarLista();
+          if (vigente) mostrar(errores, mensajeError(e));
         },
       );
       const cargaLista = cargarLista().catch((e: unknown) => {

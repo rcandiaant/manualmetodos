@@ -445,17 +445,17 @@ final class AdminTest extends TestCase
         self::assertSame(0, (int) self::$bd->query("SELECT COUNT(*) FROM capitulos WHERE slug='otro'")->fetchColumn());
     }
 
-    public function test_subir_capitulo_en_consulta_da_409(): void
+    public function test_subir_capitulo_nuevo_en_consulta_y_en_edicion_final(): void
     {
         [$c] = $this->admin();
         self::$bd->exec("UPDATE consulta SET apertura='2026-11-01 00:00:00', cierre='2026-11-30 00:00:00'");
         $r = $c->post('/admin/capitulos', $this->capitulo());
-        self::assertSame(409, $r->estado);
-        self::assertSame('etapa_no_permite', $r->datos['error']['codigo']);
-        self::assertSame(0, (int) self::$bd->query('SELECT COUNT(*) FROM capitulos')->fetchColumn());
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame(1, (int) self::$bd->query('SELECT COUNT(*) FROM capitulos')->fetchColumn());
         // y en edición final también
         self::$bd->exec("UPDATE consulta SET cierre='2026-11-02 11:00:00'");
-        self::assertSame(409, $c->post('/admin/capitulos', $this->capitulo())->estado);
+        self::assertSame(201, $c->post('/admin/capitulos', $this->capitulo(['slug' => 'cap-2']))->estado);
+        self::assertSame(2, (int) self::$bd->query('SELECT COUNT(*) FROM capitulos')->fetchColumn());
     }
 
     public function test_consulta_fechas_etapa_y_motivo(): void
@@ -498,91 +498,143 @@ final class AdminTest extends TestCase
             ['apertura' => '2026-12-01T00:00:00'],         // sin zona
             ['apertura' => '2026-02-30T00:00:00Z'],
             ['apertura' => 'mañana'],
-            ['apertura' => null],
+            ['apertura' => null],                          // solo una de las dos fechas
+            ['cierre' => null],
+            ['apertura' => ''],
             ['motivoObligatorio' => 'si'],
-            ['apertura' => '2026-11-02T11:54:00Z'],        // hace 6 min
-            ['apertura' => '2026-11-02T11:56:00Z', 'cierre' => '2026-11-02T12:00:00Z'], // cierre = ahora
-            ['apertura' => '2026-11-02T11:56:00Z', 'cierre' => '2026-11-02T11:58:00Z'], // cierre pasado
+            ['apertura' => '2026-11-02T11:00:00Z', 'cierre' => '2026-11-01T00:00:00Z'], // pasadas, pero cierre < apertura
         ] as $i => $mal) {
             self::assertSame(400, $c->put('/admin/consulta', $mal + $ok)->estado, "caso $i");
         }
+        $r = $c->put('/admin/consulta', ['apertura' => null] + $ok);
+        self::assertArrayHasKey('apertura', $r->datos['error']['campos'], 'una fecha sin la otra señala la que falta');
+        $r = $c->put('/admin/consulta', ['cierre' => '2026-11-30T00:00:00Z'] + $ok);
+        self::assertArrayHasKey('cierre', $r->datos['error']['campos']);
         self::assertNull(self::$bd->query('SELECT apertura FROM consulta')->fetchColumn());
+        self::assertCount(0, $this->auditoria('actualizar_consulta'));
     }
 
-    public function test_cambiar_fechas_en_consulta_da_409(): void
+    public function test_fechas_se_cambian_libremente_en_cualquier_etapa(): void
     {
         [$c, $a] = $this->admin();
-        $c->put('/admin/consulta', ['apertura' => '2026-11-02T12:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => false]);
-        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-05T00:00:00Z', 'cierre' => '2026-12-30T00:00:00Z', 'motivoObligatorio' => false]);
-        self::assertSame(409, $r->estado);
-        self::assertSame('etapa_no_permite', $r->datos['error']['codigo']);
-        self::assertSame('2026-11-30 00:00:00', self::$bd->query('SELECT cierre FROM consulta')->fetchColumn());
+        $bd = fn () => self::$bd->query('SELECT apertura, cierre FROM consulta')->fetch(\PDO::FETCH_NUM);
+        $put = fn (?string $ap, ?string $ci, bool $m = false) => $c->put('/admin/consulta', ['apertura' => $ap, 'cierre' => $ci, 'motivoObligatorio' => $m]);
 
-        // El motivo sí se puede cambiar, repitiendo las mismas fechas
-        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-02T15:00:00+03:00', 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => true]);
+        // Preparación → consulta abierta con una apertura en el pasado («Abrir ahora» o un error de tipeo corregible).
+        $r = $put('2026-10-01T00:00:00Z', '2026-11-30T00:00:00Z');
         self::assertSame(200, $r->estado, $r->cuerpo());
-        self::assertSame(1, (int) self::$bd->query('SELECT motivo_obligatorio FROM consulta')->fetchColumn());
-
-        // ...y también tras el cierre
-        $this->reloj->avanzar(40 * 86400);
-        $c = $this->cliente($a);
-        self::assertSame(200, $c->put('/admin/consulta', ['apertura' => '2026-11-02T12:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => false])->estado);
-        self::assertSame(409, $c->put('/admin/consulta', ['apertura' => '2026-11-02T12:00:00Z', 'cierre' => '2026-12-30T00:00:00Z', 'motivoObligatorio' => false])->estado);
-    }
-
-    public function test_en_consulta_solo_se_puede_extender_el_cierre(): void
-    {
-        [$c, $a] = $this->admin();
-        $apertura = '2026-11-02T12:00:00Z';
-        self::assertSame(200, $c->put('/admin/consulta', ['apertura' => $apertura, 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => false])->estado);
-        $this->reloj->avanzar(86400);
-        $c = $this->cliente($a);
-        $cierreBd = fn () => self::$bd->query('SELECT cierre FROM consulta')->fetchColumn();
-
-        // Extender: misma apertura (en cualquier zona), cierre más tarde. El motivo viaja igual.
-        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-02T09:00:00-03:00', 'cierre' => '2026-12-07T00:00:00Z', 'motivoObligatorio' => true]);
-        self::assertSame(200, $r->estado, $r->cuerpo());
-        self::assertSame('2026-12-07T00:00:00Z', $r->datos['cierre']);
-        self::assertSame($apertura, $r->datos['apertura']);
         self::assertSame('consulta', $r->datos['etapa']);
+
+        // Durante la consulta: mover la apertura, acortar y extender el cierre.
+        $r = $put('2026-11-01T00:00:00Z', '2026-11-20T00:00:00Z');
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertSame(['2026-11-01 00:00:00', '2026-11-20 00:00:00'], $bd());
+        $r = $put('2026-11-01T00:00:00Z', '2026-12-20T00:00:00Z', true);
+        self::assertSame(200, $r->estado, $r->cuerpo());
         self::assertTrue($r->datos['motivoObligatorio']);
-        self::assertSame('2026-12-07 00:00:00', $cierreBd());
-        $aud = $this->auditoria('actualizar_consulta');
-        self::assertStringContainsString('2026-12-07T00:00:00Z', (string) end($aud)['detalle']);
 
-        foreach ([
-            'acortar' => ['apertura' => $apertura, 'cierre' => '2026-12-06T00:00:00Z'],
-            'acortar a antes de ahora' => ['apertura' => $apertura, 'cierre' => '2026-11-03T11:00:00Z'],
-            'mover la apertura' => ['apertura' => '2026-11-01T12:00:00Z', 'cierre' => '2026-12-07T00:00:00Z'],
-            'mover la apertura y extender' => ['apertura' => '2026-11-03T00:00:00Z', 'cierre' => '2026-12-20T00:00:00Z'],
-        ] as $caso => $fechas) {
-            $r = $c->put('/admin/consulta', $fechas + ['motivoObligatorio' => true]);
-            self::assertSame(409, $r->estado, $caso);
-            self::assertSame('etapa_no_permite', $r->datos['error']['codigo'], $caso);
-        }
-        self::assertSame('2026-12-07 00:00:00', $cierreBd());
-        self::assertSame('2026-11-02 12:00:00', self::$bd->query('SELECT apertura FROM consulta')->fetchColumn());
+        // «Cerrar ahora»: cierre = ahora → edición final.
+        $r = $put('2026-11-01T00:00:00Z', '2026-11-02T12:00:00Z', true);
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertSame('edicion_final', $r->datos['etapa']);
 
-        // Cerrada la consulta, ya no se extiende (reabrirla cambiaría una etapa ya vivida).
-        $this->reloj->avanzar(40 * 86400);
-        $c = $this->cliente($a);
-        self::assertSame(409, $c->put('/admin/consulta', ['apertura' => $apertura, 'cierre' => '2027-02-01T00:00:00Z', 'motivoObligatorio' => true])->estado);
-        self::assertSame('2026-12-07 00:00:00', $cierreBd());
+        // «Volver a abrir»: desde edición final, cierre en el futuro → consulta otra vez.
+        $r = $put('2026-11-01T00:00:00Z', '2026-11-09T12:00:00Z', true);
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertSame('consulta', $r->datos['etapa']);
+
+        // Apertura futura con la consulta abierta: vuelve a preparación.
+        $r = $put('2026-11-05T00:00:00Z', '2026-11-09T12:00:00Z', true);
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertSame('preparacion', $r->datos['etapa']);
+
+        // Fechas totalmente en el pasado: válidas, quedan en edición final.
+        $r = $put('2026-10-01T00:00:00-03:00', '2026-10-15T00:00:00-03:00', true);
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertSame('edicion_final', $r->datos['etapa']);
+        self::assertSame(['2026-10-01 03:00:00', '2026-10-15 03:00:00'], $bd());
+
+        // Las mismas fechas: solo cambia el motivo.
+        $r = $put('2026-10-01T03:00:00Z', '2026-10-15T03:00:00Z', false);
+        self::assertSame(200, $r->estado, $r->cuerpo());
+        self::assertFalse($r->datos['motivoObligatorio']);
+        self::assertCount(8, $this->auditoria('actualizar_consulta'));
     }
 
-    public function test_abrir_ahora_es_valido_y_el_error_senala_el_campo(): void
+    public function test_ambas_fechas_nulas_vuelven_a_preparacion(): void
     {
         [$c] = $this->admin();
-        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-02T11:56:00Z', 'cierre' => '2026-12-01T00:00:00Z', 'motivoObligatorio' => false]);
+        self::assertSame(200, $c->put('/admin/consulta', ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => true])->estado);
+        $r = $c->put('/admin/consulta', ['apertura' => null, 'cierre' => null, 'motivoObligatorio' => true]);
         self::assertSame(200, $r->estado, $r->cuerpo());
-        self::assertSame('consulta', $r->datos['etapa']);
+        self::assertNull($r->datos['apertura']);
+        self::assertNull($r->datos['cierre']);
+        self::assertSame('preparacion', $r->datos['etapa']);
+        self::assertTrue($r->datos['motivoObligatorio']);
+        self::assertSame([null, null], self::$bd->query('SELECT apertura, cierre FROM consulta')->fetch(\PDO::FETCH_NUM));
+        // Desde preparación sin fechas se puede volver a fijar.
+        self::assertSame(200, $c->put('/admin/consulta', ['apertura' => '2026-12-01T00:00:00Z', 'cierre' => '2026-12-31T00:00:00Z', 'motivoObligatorio' => false])->estado);
+    }
 
-        self::$bd->exec('UPDATE consulta SET apertura = NULL, cierre = NULL');
-        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-02T11:54:00Z', 'cierre' => '2026-12-01T00:00:00Z', 'motivoObligatorio' => false]);
-        self::assertSame(400, $r->estado);
-        self::assertArrayHasKey('apertura', $r->datos['error']['campos']);
-        $r = $c->put('/admin/consulta', ['apertura' => '2026-11-02T11:56:00Z', 'cierre' => '2026-11-02T11:59:00Z', 'motivoObligatorio' => false]);
-        self::assertArrayHasKey('cierre', $r->datos['error']['campos']);
+    public function test_cada_cambio_de_consulta_se_audita_con_antes_y_despues(): void
+    {
+        [$c, $a] = $this->admin();
+        $c->put('/admin/consulta', ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'motivoObligatorio' => false]);
+        $c->put('/admin/consulta', ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-02T12:00:00Z', 'motivoObligatorio' => true]);
+        $c->put('/admin/consulta', ['apertura' => null, 'cierre' => null, 'motivoObligatorio' => true]);
+        $aud = $this->auditoria('actualizar_consulta');
+        self::assertCount(3, $aud);
+        self::assertSame((int) $a['id'], (int) $aud[0]['usuario_id']);
+        self::assertSame([
+            'antes' => ['apertura' => null, 'cierre' => null, 'etapa' => 'preparacion', 'motivoObligatorio' => false],
+            'despues' => ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'etapa' => 'consulta', 'motivoObligatorio' => false],
+        ], json_decode((string) $aud[0]['detalle'], true));
+        self::assertSame([
+            'antes' => ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-30T00:00:00Z', 'etapa' => 'consulta', 'motivoObligatorio' => false],
+            'despues' => ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-02T12:00:00Z', 'etapa' => 'edicion_final', 'motivoObligatorio' => true],
+        ], json_decode((string) $aud[1]['detalle'], true));
+        self::assertSame([
+            'antes' => ['apertura' => '2026-11-01T00:00:00Z', 'cierre' => '2026-11-02T12:00:00Z', 'etapa' => 'edicion_final', 'motivoObligatorio' => true],
+            'despues' => ['apertura' => null, 'cierre' => null, 'etapa' => 'preparacion', 'motivoObligatorio' => true],
+        ], json_decode((string) $aud[2]['detalle'], true));
+    }
+
+    public function test_get_consulta_agrega_conteos_solo_para_admin(): void
+    {
+        [$c] = $this->admin();
+        $r = $c->post('/admin/capitulos', $this->capitulo());
+        $cap = $r->datos['id'];
+        $ver = $r->datos['versionId'];
+        $lab = $this->crearUsuario();
+        $revisor = $this->crearUsuario(['roles' => ['revisor']]);
+
+        $g = $c->get('/consulta')->datos;
+        self::assertSame(0, $g['decisionesTomadas']);
+        self::assertSame(0, $g['aportes']);
+        self::assertFalse($g['reinicioPermitido'], 'sin REINICIO_PRUEBAS=1 queda deshabilitado');
+
+        $l = $lab['id'];
+        foreach (['pendiente', 'aceptada', 'rechazada', 'modificada'] as $i => $estado) {
+            self::$bd->exec("INSERT INTO sugerencias (usuario_id, capitulo_id, version_base_id, uid, bloque_id, tipo, datos, estado) VALUES ($l, $cap, $ver, 'u:$i', 'b1', 'contenido', '{}', '$estado')");
+        }
+        self::$bd->exec("INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto) VALUES ($l, $cap, 'b1', '{}', 'a')");
+        self::$bd->exec("INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto, estado) VALUES ($l, $cap, 'b1', '{}', 'b', 'resuelto')");
+
+        $g = $c->get('/consulta')->datos;
+        self::assertSame(3, $g['decisionesTomadas']);
+        self::assertSame(6, $g['aportes']);
+        self::assertSame(['apertura', 'cierre', 'etapa', 'motivoObligatorio', 'decisionesTomadas', 'aportes', 'reinicioPermitido'], array_keys($g));
+
+        // Laboratorio y revisor no ven los campos de admin.
+        foreach ([$lab, $revisor] as $u) {
+            $g = $this->cliente($u)->get('/consulta')->datos;
+            self::assertSame(['apertura', 'cierre', 'etapa', 'motivoObligatorio'], array_keys($g));
+        }
+        // La respuesta del PUT es la misma que la de GET para el admin.
+        $p = $c->put('/admin/consulta', ['apertura' => null, 'cierre' => null, 'motivoObligatorio' => false])->datos;
+        self::assertSame(3, $p['decisionesTomadas']);
+        self::assertSame(6, $p['aportes']);
+        self::assertFalse($p['reinicioPermitido']);
     }
 
     public function test_subida_concurrente_del_mismo_slug_da_409(): void

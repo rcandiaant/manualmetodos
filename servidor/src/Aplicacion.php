@@ -17,12 +17,15 @@ use Manual\Controladores\CapitulosCtl;
 use Manual\Controladores\ComentariosCtl;
 use Manual\Controladores\ConsultaCtl;
 use Manual\Controladores\CopiaCtl;
+use Manual\Controladores\ReinicioCtl;
 use Manual\Controladores\RevisionCtl;
 use Manual\Controladores\SesionCtl;
 use Manual\Http\Enrutador;
 use Manual\Http\ErrorHttp;
 use Manual\Http\Peticion;
 use Manual\Http\Respuesta;
+use Manual\Mantenimiento\ReinicioPruebas;
+use Manual\Mantenimiento\Respaldo;
 use Manual\Seguridad\AlmacenSesion;
 use Manual\Seguridad\AlmacenSesionNativa;
 use Manual\Seguridad\Cabeceras;
@@ -42,14 +45,18 @@ final class Aplicacion
     private readonly Reloj $reloj;
     private ?Peticion $peticion = null;
     private ?Sesion $sesion = null;
+    private readonly string $dirRespaldos;
 
+    /** @param string|null $dirRespaldos destino del respaldo previo a «Reiniciar datos de prueba» (por defecto var/respaldos, como bin/cron.php) */
     public function __construct(
         private readonly Config $config,
         ?Reloj $reloj = null,
         private ?AlmacenSesion $almacenSesion = null,
         private ?\PDO $bd = null,
+        ?string $dirRespaldos = null,
     ) {
         $this->reloj = $reloj ?? new RelojSistema();
+        $this->dirRespaldos = $dirRespaldos ?? dirname(__DIR__) . '/var/respaldos';
         $this->enrutador = new Enrutador();
         $this->registrarRutas();
     }
@@ -110,6 +117,10 @@ final class Aplicacion
         $this->ruta('POST', '/api/admin/usuarios/{id}/clave', fn (Peticion $p, array $a) => $this->adminCtl()->regenerarClave($p, $a));
         $this->ruta('PATCH', '/api/admin/usuarios/{id}', fn (Peticion $p, array $a) => $this->adminCtl()->actualizarUsuario($p, $a));
         $this->ruta('PUT', '/api/admin/consulta', fn (Peticion $p) => $this->adminCtl()->guardarConsulta($p));
+        // «Reiniciar datos de prueba»: la ruta solo existe con REINICIO_PRUEBAS=1 (si no, 404 como cualquier otra).
+        if ($this->config->reinicioPruebas) {
+            $this->ruta('POST', '/api/admin/reiniciar', fn (Peticion $p) => $this->reinicioCtl()->reiniciar($p));
+        }
     }
 
     /**
@@ -149,7 +160,7 @@ final class Aplicacion
 
     private function consultaCtl(): ConsultaCtl
     {
-        return new ConsultaCtl($this->sesion(), new Consulta($this->bd(), $this->reloj));
+        return new ConsultaCtl($this->sesion(), new Consulta($this->bd(), $this->reloj), $this->config->reinicioPruebas);
     }
 
     private function capitulosCtl(): CapitulosCtl
@@ -196,7 +207,18 @@ final class Aplicacion
             $this->capitulos(),
             new Consulta($this->bd(), $this->reloj),
             $this->auditoria(),
-            $this->reloj,
+            $this->config->reinicioPruebas,
+        );
+    }
+
+    private function reinicioCtl(): ReinicioCtl
+    {
+        return new ReinicioCtl(
+            $this->sesion(),
+            new Respaldo($this->bd(), $this->reloj),
+            new ReinicioPruebas($this->bd()),
+            $this->auditoria(),
+            $this->dirRespaldos,
         );
     }
 

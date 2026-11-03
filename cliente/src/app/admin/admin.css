@@ -10,7 +10,7 @@
 .admin .acciones { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .admin .error, .admin .error-campo { color: var(--eliminado); margin: 6px 0; }
 .admin .exito { color: var(--insertado); background: var(--insertado-fondo); padding: 8px 12px; border-radius: var(--radio); margin: 8px 0; }
-.admin .bloqueo, .admin .advertencia, .admin .confirmar {
+.admin .aviso-reemplazo, .admin .advertencia, .admin .confirmar {
   background: var(--conflicto-fondo); border-left: 4px solid var(--conflicto); padding: 8px 12px; margin: 8px 0; border-radius: var(--radio);
 }
 .admin .vista-previa, .admin .panel-claves {
@@ -37,3 +37,33 @@
 .admin button.borrar-definitivo { background: var(--eliminado); color: #fff; border: 1px solid var(--eliminado); font-weight: 600; }
 .admin button.borrar-definitivo:hover:not(:disabled) { background: #a31515; color: #fff; border-color: #a31515; }
 .admin button.borrar-definitivo:disabled { background: var(--fondo); color: var(--tenue); border-color: var(--borde); opacity: 1; cursor: progress; }
+/* Capítulos: nota informativa de la etapa (no bloquea la subida). */
+.admin .nota-etapa-capitulos { color: var(--tenue); }
+
+/* Consulta: estado actual con insignia de etapa y fechas en hora de Chile. */
+.admin .estado-consulta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+  background: var(--papel); border: 1px solid var(--borde); border-radius: var(--radio); padding: 14px 16px; margin: 12px 0;
+}
+.admin .insignia-etapa {
+  display: inline-block; font-size: 1.15rem; font-weight: 700; padding: 6px 14px; border-radius: 999px;
+  border: 2px solid var(--tenue); background: var(--fondo); color: var(--tinta);
+}
+.admin .insignia-etapa[data-etapa=consulta] { border-color: var(--insertado); background: var(--insertado-fondo); color: #0f5a26; }
+.admin .insignia-etapa[data-etapa=edicion_final] { border-color: var(--conflicto); background: var(--conflicto-fondo); color: #8a3300; }
+.admin .fechas-consulta { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 0; }
+.admin .fechas-consulta dt { font-weight: 600; font-size: 0.85rem; color: var(--tenue); }
+.admin .fechas-consulta dd { margin: 0; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.admin .fechas-consulta .ayuda { flex-basis: 100%; color: var(--tenue); font-size: 0.85rem; }
+.admin .acciones-rapidas { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.admin .confirmar-consulta .pregunta { font-weight: 600; margin: 0 0 6px; }
+.admin .confirmar-consulta p { margin: 0 0 6px; }
+.admin .confirmar-consulta .advertencia { background: var(--papel); border-left-color: var(--eliminado); color: var(--tinta); }
+
+/* Zona de pruebas: al pie de la página de la consulta, separada y en rojo. */
+.admin .zona-pruebas {
+  margin: 32px 0 12px; padding: 12px 16px; border: 2px dashed var(--eliminado); border-radius: var(--radio); background: var(--papel);
+}
+.admin .zona-pruebas h2 { color: var(--eliminado); margin-top: 0; }
+.admin .zona-pruebas input[name=confirmacion-reinicio] { font-family: ui-monospace, Consolas, monospace; letter-spacing: 0.05em; margin-right: 8px; }
+.admin .zona-pruebas button.borrar-definitivo:disabled { cursor: not-allowed; }

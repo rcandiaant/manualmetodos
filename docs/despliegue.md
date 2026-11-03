@@ -132,6 +132,26 @@ Cada clave son 32 bytes aleatorios escritos en base64 (un texto de 44 caracteres
 
 El servidor se niega a arrancar si una clave falta, no mide 32 bytes o si las dos son iguales. Eso es intencional.
 
+### 5.3 Reiniciar datos de prueba (solo durante las pruebas)
+
+Mientras se prueba la plataforma con los laboratorios, el administrador puede necesitar dejarla limpia entre una ronda y otra. Para eso existe **«Reiniciar datos de prueba»** (en *Administración → Consulta*, al pie: «Zona de pruebas»). Borra copias, propuestas, comentarios, decisiones y versiones finales, y devuelve la consulta a preparación. Conserva capítulos, usuarios, auditoría e intentos de login. Antes de borrar escribe un respaldo en `var/respaldos/`, igual al del Cron Job (sección 8), y si el respaldo falla no borra nada. El detalle está en [`docs/api.md` §4.6](api.md#46-administración).
+
+**Está apagado por defecto.** Para habilitarlo durante las pruebas:
+
+1. Edite el `.env` (paso 5.2) y agregue al final la línea:
+
+   ```
+   REINICIO_PRUEBAS=1
+   ```
+
+   Tiene que ser exactamente `1`. Cualquier otro valor, o la línea ausente, lo deja apagado.
+2. Guarde. No hace falta reiniciar nada: el cambio vale desde la petición siguiente.
+3. En *Administración → Consulta* debe aparecer, al final, la **Zona de pruebas**.
+
+**Antes de la consulta real, apáguelo (obligatorio):** borre la línea `REINICIO_PRUEBAS=1` del `.env`, o cámbiela a `REINICIO_PRUEBAS=0`. Compruebe que la Zona de pruebas ya no aparece en *Administración → Consulta* (recargue la página). Con el reinicio apagado, la ruta `POST /api/admin/reiniciar` ni siquiera existe (responde 404).
+
+Cada reinicio deja su respaldo en `var/respaldos/` y cuenta para la rotación de los 14 más recientes. Si hizo muchos reinicios seguidos, descargue antes de la consulta real algún respaldo diario que quiera conservar.
+
 ## 6. Ajustar PHP
 
 ### 6.1 Versión y límites
@@ -270,7 +290,7 @@ Después:
 
 1. Entre con el correo y la clave del paso 7. Debe llegar a la lista de capítulos, con el botón **Administración**. Si entra, también quedan comprobadas la cookie segura y la protección contra peticiones de otro sitio (`origen_invalido`).
 2. Recargue la página (F5). Debe seguir dentro. Si vuelve a pedir la clave, el sitio no se está sirviendo por HTTPS (revise el paso 1).
-3. Pulse **Administración → Consulta**. Debe ver el formulario de apertura y cierre, sin mensajes de error. Si ya conoce las fechas reales de la consulta, guárdelas ahí: debe aparecer «Cambios guardados.». Mientras la consulta esté en preparación, las fechas se pueden cambiar.
+3. Pulse **Administración → Consulta**. Debe ver la etapa actual («Preparación») y el formulario de apertura y cierre, sin mensajes de error. Si ya conoce las fechas reales de la consulta, guárdelas ahí: debe aparecer «Cambios guardados.». Las fechas se pueden cambiar en cualquier momento. Si es la instalación para la consulta real, compruebe también que **no** aparece la «Zona de pruebas» al pie (5.3).
 
 **Con una terminal** (opcional, para el equipo técnico):
 

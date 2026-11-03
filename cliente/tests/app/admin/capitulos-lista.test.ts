@@ -140,18 +140,25 @@ describe('admin: lista de capítulos', () => {
     expect(entradaTitulo(raiz, 1).value).toBe('A medio escribir');
   });
 
-  it('fuera de preparación el botón Borrar está deshabilitado y explica por qué', async () => {
-    const { raiz } = await montar('consulta');
-    const b = botonEn(fila(raiz, 1), 'Borrar');
-    expect(b.disabled).toBe(true);
-    expect(b.title).toBe('Solo se pueden borrar capítulos antes de abrir la consulta');
-    // Editar sigue permitido.
-    expect(botonEn(fila(raiz, 1), 'Guardar').disabled).toBe(false);
+  it('en cualquier etapa el botón Borrar está habilitado y borra tras confirmar', async () => {
+    for (const etapa of ['consulta', 'edicion_final'] as const) {
+      const { raiz, vista, f } = await montar(etapa, new Response(null, { status: 204 }));
+      const b = botonEn(fila(raiz, 1), 'Borrar');
+      expect(b.disabled).toBe(false);
+      expect(b.title).toBe('');
+      expect(botonEn(fila(raiz, 1), 'Guardar').disabled).toBe(false);
+      b.click();
+      botonEn(raiz.querySelector('.confirmar') as HTMLElement, 'Borrar definitivamente').click();
+      await vista.listo;
+      expect(f.llamadas[2].url).toBe('/api/admin/capitulos/1');
+      expect(f.llamadas[2].init.method).toBe('DELETE');
+      expect(filas(raiz)).toHaveLength(2);
+    }
   });
 
   it('un 409 por aportes muestra el mensaje del servidor', async () => {
     const msg = 'No se puede borrar el capítulo: ya tiene aportes (copias, sugerencias o comentarios de laboratorios, o una versión final).';
-    const { raiz, vista } = await montar('preparacion', json(409, { error: { codigo: 'operacion_no_permitida', mensaje: msg } }));
+    const { raiz, vista } = await montar('consulta', json(409, { error: { codigo: 'operacion_no_permitida', mensaje: msg } }));
     botonEn(fila(raiz, 1), 'Borrar').click();
     botonEn(raiz.querySelector('.confirmar') as HTMLElement, 'Borrar definitivamente').click();
     await vista.listo;
@@ -171,7 +178,7 @@ describe('admin: lista de capítulos (ronda de correcciones)', () => {
     botonEn(fila(raiz, 1), 'Borrar').click();
     botonEn(raiz.querySelector('.confirmar') as HTMLElement, 'Cancelar').click();
     vista.cargar('cap-1.tex', 'Hola.\n');
-    botonEn(raiz, 'Subir').click();
+    botonEn(raiz, 'Subir y reemplazar').click(); // el slug cap-1 ya existe
     await vista.listo;
     expect(entradaTitulo(raiz, 1).value).toBe('Cloruro nuevo');
     expect(entradaOrden(raiz, 1).value).toBe('4');
@@ -188,7 +195,7 @@ describe('admin: lista de capítulos (ronda de correcciones)', () => {
     entradaTitulo(raiz, 2).value = 'Nitrato a medias';
     entradaTitulo(raiz, 2).dispatchEvent(new Event('input', { bubbles: true }));
     vista.cargar('cap-1.tex', 'Hola.\n');
-    botonEn(raiz, 'Subir').click();
+    botonEn(raiz, 'Subir y reemplazar').click(); // el slug cap-1 ya existe
     await vista.listo;
     expect(entradaTitulo(raiz, 1).value).toBe('Cloruro nuevo');
     expect(entradaOrden(raiz, 1).value).toBe('1');
@@ -231,7 +238,7 @@ describe('admin: lista de capítulos (ronda de correcciones)', () => {
     expect(alerta(raiz)?.textContent).toBe(msg);
   });
 
-  it('sin etapa conocida, Borrar está deshabilitado sin afirmar que la consulta está abierta', async () => {
+  it('aunque no se sepa la etapa, Borrar sigue habilitado (la decide el servidor)', async () => {
     const f = fetchSimulado(json(500, { error: { codigo: 'error_interno', mensaje: 'x' } }), json(200, LISTA));
     const api = crearApi({ fetch: f.fetch, alSinSesion: () => {} });
     const raiz = document.createElement('div');
@@ -239,8 +246,8 @@ describe('admin: lista de capítulos (ronda de correcciones)', () => {
     vista.montar(raiz);
     await vista.listo;
     const b = botonEn(fila(raiz, 1), 'Borrar');
-    expect(b.disabled).toBe(true);
-    expect(b.title).toBe('No se pudo saber la etapa de la consulta; recargue la página');
+    expect(b.disabled).toBe(false);
+    expect(b.title).toBe('');
   });
 
   it('los botones de borrar usan clases propias, no la global «peligro»', async () => {

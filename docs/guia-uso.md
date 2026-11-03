@@ -4,11 +4,11 @@ Esta guía explica, en pocas palabras, cómo se usa la plataforma según su rol.
 
 ## Las tres etapas
 
-La plataforma pasa sola de una etapa a otra según las fechas que fija el administrador. Todas las horas son de Chile.
+La plataforma pasa sola de una etapa a otra según las fechas que fija el administrador, que puede cambiarlas en cualquier momento (por ejemplo, abrir o cerrar la consulta en el acto). Todas las horas son de Chile.
 
 | Etapa | Qué se puede hacer |
 |---|---|
-| **Preparación** (antes de la apertura) | El administrador sube los capítulos y crea las cuentas. Los laboratorios todavía no pueden editar. |
+| **Preparación** (antes de la apertura) | El administrador sube los capítulos y crea las cuentas (los capítulos también se pueden subir después). Los laboratorios todavía no pueden editar. |
 | **Consulta** (entre la apertura y el cierre) | Los laboratorios proponen cambios y dejan comentarios. El revisor puede mirar lo que llega, pero aún no decide. |
 | **Edición final** (después del cierre) | Los laboratorios ya no pueden editar; ven qué se decidió sobre lo suyo. El revisor decide y arma la versión final. |
 
@@ -115,12 +115,15 @@ El **registro de cambios** reúne en una sola tabla todos los aportes de los lab
 
 ## Administrador
 
-### Capítulos (solo en preparación)
+### Capítulos
 
 1. En **Capítulos**, elija el archivo `.tex` del capítulo. Verá una vista previa y avisos de lo que no se pudo convertir. Esos trozos quedan protegidos y los laboratorios no pueden editarlos.
-2. Revise el identificador (slug), el título y el orden, y pulse **Subir**. Si sube de nuevo el mismo identificador, se crea una nueva versión del capítulo.
+2. Revise el identificador (slug), el título y el orden, y pulse **Subir**.
 
-Una vez abierta la consulta ya no se pueden subir capítulos.
+- **Un capítulo nuevo se puede subir en cualquier etapa.** Si la consulta ya está abierta, los laboratorios lo ven de inmediato.
+- **Reemplazar el texto de un capítulo:** súbalo de nuevo con el mismo identificador. El formulario lo avisa («la subida reemplazará el texto de "…"») y el botón dice **Subir y reemplazar**. Solo es posible mientras **ningún laboratorio haya trabajado en él** (copias, propuestas o comentarios) y no tenga versión final. Si ya trabajaron, la plataforma lo impide y dice cuántos laboratorios: «2 laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto». En ese caso corrija el texto en la edición final, o suba el capítulo corregido con otro identificador.
+- En la lista **Capítulos subidos** puede cambiar el orden y el título en cualquier momento.
+- **Borrar** un capítulo se puede en cualquier etapa, pero solo si no tiene aportes. La plataforma pide confirmar en la misma página.
 
 ### Usuarios
 
@@ -133,6 +136,29 @@ El primer administrador lo crea el equipo técnico al instalar la plataforma (ve
 
 ### Consulta
 
-- Fije la **apertura** y el **cierre** en hora de Chile. La consulta se abre y se cierra sola en esas fechas.
-- Con la consulta abierta solo se puede **extender el cierre** (por ejemplo, "ampliamos una semana"). No se puede acortarlo, mover la apertura ni reabrir una consulta ya cerrada.
+Arriba se ve, destacada, la **etapa actual** (Preparación, Consulta abierta o Edición final) con la apertura y el cierre en hora de Chile.
+
+**Acciones rápidas.** Cada una pide confirmar en la página y avisa qué va a pasar:
+
+| Acción | Cuándo aparece | Qué hace |
+|---|---|---|
+| **Abrir ahora** | en preparación | La apertura pasa a ser este momento. Si no había cierre, o ya pasó, el cierre queda en 7 días. |
+| **Cerrar ahora** | con la consulta abierta | El cierre pasa a ser este momento. Los laboratorios ya no podrán editar; el revisor podrá decidir. |
+| **Extender cierre +1 día** / **+1 semana** | con la consulta abierta | Suma un día o una semana al cierre. |
+| **Volver a abrir** | en edición final | El cierre queda en 7 días desde ahora. Si el revisor ya tomó decisiones, se avisa: si un laboratorio vuelve a modificar una propuesta ya decidida, esa decisión se pierde. |
+| **Volver a preparación** | si hay fechas | Quita las dos fechas. El trabajo de los laboratorios queda guardado, pero no podrán editar hasta que la consulta se vuelva a abrir. |
+
+**Fechas a mano.** También puede escribir la apertura y el cierre que quiera, en cualquier etapa e incluso en el pasado; el cierre debe ser posterior a la apertura. Si deja las dos vacías, la consulta vuelve a preparación. Si las fechas nuevas cambian la etapa, la plataforma pide confirmar. Cada cambio queda registrado en la auditoría con los valores de antes y de después.
 - **Motivo obligatorio** pide a los laboratorios un motivo para cada cambio. Se puede cambiar en cualquier momento y nunca impide guardar.
+
+### Zona de pruebas: reiniciar los datos de prueba
+
+Al pie de la página **Consulta** aparece la **Zona de pruebas**, pero **solo si el equipo técnico la habilitó** en el servidor (`REINICIO_PRUEBAS=1`, ver la [guía de despliegue](despliegue.md#53-reiniciar-datos-de-prueba-solo-durante-las-pruebas)). Sirve para dejar la plataforma limpia entre una ronda de pruebas y otra, sin volver a subir capítulos ni crear cuentas.
+
+- **Se borra:** las copias de los laboratorios y sus instantáneas, las propuestas (sugerencias), los comentarios, las decisiones y las versiones finales del revisor, y las fechas de la consulta (vuelve a preparación).
+- **Se conserva:** los capítulos con su texto base, los usuarios y sus claves, la auditoría y los registros de inicio de sesión.
+- Antes de borrar, el servidor guarda un **respaldo completo** de la base en `var/respaldos`. Si el respaldo falla, no se borra nada.
+
+Para usarla, escriba `REINICIAR` (en mayúsculas) en el cuadro y pulse **Reiniciar datos de prueba**. Al terminar verá el nombre del respaldo y cuántas filas se borraron de cada tipo.
+
+**Antes de la consulta real, el equipo técnico debe deshabilitarla.** Si la Zona de pruebas todavía aparece cuando la consulta real va a empezar, avíseles.

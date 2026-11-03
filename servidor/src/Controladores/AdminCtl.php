@@ -8,12 +8,10 @@ use Manual\Acceso\Auditoria;
 use Manual\Acceso\Capitulos;
 use Manual\Acceso\Consulta;
 use Manual\Acceso\Usuarios;
-use Manual\Dominio\Etapa;
 use Manual\Dominio\Rol;
 use Manual\Http\ErrorHttp;
 use Manual\Http\Peticion;
 use Manual\Http\Respuesta;
-use Manual\Reloj;
 use Manual\Seguridad\Claves;
 use Manual\Seguridad\Sesion;
 use Manual\Validacion\Entrada;
@@ -31,7 +29,7 @@ final class AdminCtl
         private readonly Capitulos $capitulos,
         private readonly Consulta $consulta,
         private readonly Auditoria $auditoria,
-        private readonly Reloj $reloj,
+        private readonly bool $reinicioPermitido = false,
     ) {
     }
 
@@ -131,10 +129,9 @@ final class AdminCtl
 
     public function subirCapitulo(Peticion $p): Respuesta
     {
+        // Un capítulo nuevo se sube en cualquier etapa. Reemplazar el texto de uno existente (mismo slug)
+        // también, salvo que ya tenga aportes: entonces 409 operacion_no_permitida (lo decide subirBase).
         $admin = $this->sesion->exigirRol(Rol::ADMIN);
-        if ($this->consulta->etapa() !== Etapa::PREPARACION) {
-            throw new ErrorHttp(409, 'etapa_no_permite', 'Solo se pueden subir capítulos antes de la apertura de la consulta.');
-        }
         $e = $p->json();
         $slug = Entrada::texto($e, 'slug', 80);
         if (preg_match('/^[a-z0-9-]{1,80}$/D', $slug) !== 1) {
@@ -163,10 +160,18 @@ final class AdminCtl
             }
             throw $ex;
         }
+        if ($r['estado'] === 'con_aportes') {
+            $n = $r['laboratorios'];
+            throw new ErrorHttp(409, 'operacion_no_permitida', match (true) {
+                $n === 0 => 'El capítulo ya tiene una versión final; no se puede reemplazar el texto.',
+                $n === 1 => '1 laboratorio ya trabajó en este capítulo; no se puede reemplazar el texto.',
+                default => "$n laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto.",
+            });
+        }
         $this->auditoria->registrar($admin['id'], 'subir_capitulo', 'capitulo', $r['id'], [
             'slug' => $slug, 'versionId' => $r['versionId'], 'orden' => $orden, 'bytesTex' => strlen($tex), 'bytesDoc' => strlen($docJson),
         ]);
-        return Respuesta::json(201, $r);
+        return Respuesta::json(201, ['id' => $r['id'], 'versionId' => $r['versionId']]);
     }
 
     /**
@@ -201,15 +206,12 @@ final class AdminCtl
     }
 
     /**
-     * DELETE /admin/capitulos/{id}: solo en preparación y solo si el capítulo no tiene aportes
-     * (copias, instantáneas, sugerencias, comentarios ni versión final). Orden: rol, etapa (409), 404, aportes (409).
+     * DELETE /admin/capitulos/{id}: en cualquier etapa, solo si el capítulo no tiene aportes
+     * (copias, instantáneas, sugerencias, comentarios ni versión final). Orden: rol, 404, aportes (409).
      */
     public function borrarCapitulo(Peticion $p, array $params): Respuesta
     {
         $admin = $this->sesion->exigirRol(Rol::ADMIN);
-        if ($this->consulta->etapa() !== Etapa::PREPARACION) {
-            throw new ErrorHttp(409, 'etapa_no_permite', 'Solo se pueden borrar capítulos antes de la apertura de la consulta.');
-        }
         $id = (int) $params['id'];
         try {
             $r = $this->capitulos->borrarSinAportes($id);
@@ -234,52 +236,49 @@ final class AdminCtl
         return Respuesta::vacia();
     }
 
+    /**
+     * PUT /admin/consulta con `{apertura, cierre, motivoObligatorio}`: el admin fija las fechas libremente
+     * en cualquier etapa (docs/api.md §4.6). Ambas null: vuelve a preparación. Ambas fechas: cierre > apertura;
+     * pueden estar en el pasado («Cerrar ahora» es cierre = ahora). Una sola: 400.
+     * Cada cambio queda en auditoría con los valores anteriores y los nuevos.
+     */
     public function guardarConsulta(Peticion $p): Respuesta
     {
         $admin = $this->sesion->exigirRol(Rol::ADMIN);
         $e = $p->json();
-        $apertura = Entrada::fechaIso($e, 'apertura');
-        $cierre = Entrada::fechaIso($e, 'cierre');
+        foreach (['apertura', 'cierre'] as $campo) {
+            if (!array_key_exists($campo, $e)) {
+                throw Entrada::invalido($campo, 'es obligatorio (null para quitar las fechas)');
+            }
+        }
+        $apertura = null;
+        $cierre = null;
+        if ($e['apertura'] !== null || $e['cierre'] !== null) {
+            if ($e['apertura'] === null) {
+                throw Entrada::invalido('apertura', 'falta: indique ambas fechas, o ninguna para volver a preparación');
+            }
+            if ($e['cierre'] === null) {
+                throw Entrada::invalido('cierre', 'falta: indique ambas fechas, o ninguna para volver a preparación');
+            }
+            $apertura = Entrada::fechaIso($e, 'apertura');
+            $cierre = Entrada::fechaIso($e, 'cierre');
+            // La base guarda segundos: se descartan las fracciones antes de comparar y guardar.
+            $apertura = $apertura->setTimestamp($apertura->getTimestamp());
+            $cierre = $cierre->setTimestamp($cierre->getTimestamp());
+            if ($cierre <= $apertura) {
+                throw Entrada::invalido('cierre', 'debe ser posterior a la apertura');
+            }
+        }
         if (!is_bool($e['motivoObligatorio'] ?? null)) {
             throw Entrada::invalido('motivoObligatorio', 'debe ser verdadero o falso');
         }
-        $motivo = $e['motivoObligatorio'];
-        // La base guarda segundos: se descartan las fracciones antes de comparar y guardar.
-        $apertura = $apertura->setTimestamp($apertura->getTimestamp());
-        $cierre = $cierre->setTimestamp($cierre->getTimestamp());
-        if ($cierre <= $apertura) {
-            throw Entrada::invalido('cierre', 'debe ser posterior a la apertura');
-        }
 
-        $actual = $this->consulta->dto();
-        $mismas = $actual['apertura'] === Consulta::iso($apertura) && $actual['cierre'] === Consulta::iso($cierre);
-        if ($actual['etapa'] === Etapa::PREPARACION) {
-            // Un error de tipeo en el pasado abriría o cerraría la consulta al instante y bloquearía las fechas.
-            // «Abrir ahora» es válido: apertura >= ahora - 5 min.
-            $ahora = $this->reloj->ahora();
-            if ($apertura < $ahora->modify('-5 minutes')) {
-                throw Entrada::invalido('apertura', 'no puede ser anterior a hace 5 minutos (para abrir ahora use la hora actual)');
-            }
-            if ($cierre <= $ahora) {
-                throw Entrada::invalido('cierre', 'debe ser posterior a la hora actual');
-            }
-            $this->consulta->guardar($apertura, $cierre, $motivo);
-        } elseif ($mismas) {
-            $this->consulta->guardarMotivo($motivo);
-        } elseif ($actual['etapa'] === Etapa::CONSULTA && $actual['apertura'] === Consulta::iso($apertura)
-            && $actual['cierre'] !== null && Consulta::iso($cierre) > $actual['cierre'] && $cierre > $this->reloj->ahora()) {
-            // «Ampliamos una semana»: durante la consulta solo se puede atrasar el cierre. No altera ninguna
-            // etapa ya vivida; acortarlo o mover la apertura sí lo haría (409, abajo).
-            // Las fechas ISO en UTC con «Z» y el mismo formato se comparan bien como texto.
-            $this->consulta->guardar($apertura, $cierre, $motivo);
-        } else {
-            throw new ErrorHttp(409, 'etapa_no_permite', 'Las fechas solo se pueden cambiar antes de la apertura; durante la consulta solo se puede extender el cierre. El motivo obligatorio sí se puede cambiar.');
-        }
-        $nuevo = $this->consulta->dto();
+        $antes = $this->consulta->dto();
+        $this->consulta->guardar($apertura, $cierre, $e['motivoObligatorio']);
         $this->auditoria->registrar($admin['id'], 'actualizar_consulta', 'consulta', 1, [
-            'apertura' => $nuevo['apertura'], 'cierre' => $nuevo['cierre'], 'motivoObligatorio' => $nuevo['motivoObligatorio'],
+            'antes' => $antes, 'despues' => $this->consulta->dto(),
         ]);
-        return Respuesta::json(200, $nuevo);
+        return Respuesta::json(200, $this->consulta->dtoAdmin($this->reinicioPermitido));
     }
 
     /**

@@ -210,18 +210,119 @@ final class AdminCapitulosTest extends TestCase
         self::assertSame(404, $c->delete("/admin/capitulos/$cap")->estado);
     }
 
-    public function test_borrar_fuera_de_preparacion_da_409(): void
+    public function test_borrar_sin_aportes_en_cualquier_etapa(): void
     {
         [$c] = $this->admin();
-        $cap = $this->subir($c)['id'];
-        foreach (['abrirConsulta', 'cerrarConsulta'] as $paso) {
+        foreach (['abrirConsulta' => 'cap-a', 'cerrarConsulta' => 'cap-b'] as $paso => $slug) {
+            $cap = $this->subir($c, $slug)['id'];
             $this->$paso();
             $r = $c->delete("/admin/capitulos/$cap");
+            self::assertSame(204, $r->estado, "$paso: " . $r->cuerpo());
+            self::assertFalse($this->fila($cap), $paso);
+        }
+        self::assertCount(2, $this->auditoria('borrar_capitulo'));
+    }
+
+    public function test_borrar_con_aportes_fuera_de_preparacion_sigue_dando_409(): void
+    {
+        [$c] = $this->admin();
+        $s = $this->subir($c);
+        $lab = $this->crearUsuario()['id'];
+        self::$bd->exec("INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto) VALUES ($lab, {$s['id']}, 'b1', '{}', 'hola')");
+        foreach (['abrirConsulta', 'cerrarConsulta'] as $paso) {
+            $this->$paso();
+            $r = $c->delete("/admin/capitulos/{$s['id']}");
             self::assertSame(409, $r->estado, $paso);
-            self::assertSame('etapa_no_permite', $r->datos['error']['codigo']);
-            self::assertIsArray($this->fila($cap));
+            self::assertSame('operacion_no_permitida', $r->datos['error']['codigo']);
+            self::assertStringContainsString('aportes', $r->datos['error']['mensaje']);
+            self::assertIsArray($this->fila($s['id']));
         }
         self::assertCount(0, $this->auditoria('borrar_capitulo'));
+    }
+
+    // ---------------------------------------------------------------- POST (subir / reemplazar)
+
+    public function test_subir_capitulo_nuevo_en_cualquier_etapa(): void
+    {
+        [$c] = $this->admin();
+        $this->abrirConsulta();
+        $a = $this->subir($c, 'en-consulta', 'En consulta', 2);
+        $this->cerrarConsulta();
+        $b = $this->subir($c, 'en-edicion', 'En edición final', 3);
+        self::assertSame(['en-consulta', 'en-edicion'], array_column($c->get('/capitulos')->datos, 'slug'));
+        self::assertNotSame($a['id'], $b['id']);
+        self::assertCount(2, $this->auditoria('subir_capitulo'));
+    }
+
+    public function test_reemplazar_texto_sin_aportes_en_cualquier_etapa(): void
+    {
+        [$c] = $this->admin();
+        $v1 = $this->subir($c);
+        $this->abrirConsulta();
+        $v2 = $this->subir($c, 'cap-1', 'Reemplazado en consulta');
+        $this->cerrarConsulta();
+        $v3 = $this->subir($c, 'cap-1', 'Reemplazado en edición final', 4);
+        self::assertSame($v1['id'], $v2['id']);
+        self::assertSame($v1['id'], $v3['id']);
+        self::assertGreaterThan($v2['versionId'], $v3['versionId']);
+        self::assertSame(['orden' => 4, 'titulo' => 'Reemplazado en edición final', 'slug' => 'cap-1'], $this->filaTipada($v1['id']));
+        self::assertSame(3, (int) self::$bd->query("SELECT COUNT(*) FROM versiones_capitulo WHERE tipo = 'base'")->fetchColumn());
+    }
+
+    public function test_reemplazar_texto_con_aportes_da_409_y_dice_cuantos_laboratorios(): void
+    {
+        [$c] = $this->admin();
+        $s = $this->subir($c);
+        $cap = $s['id'];
+        $ver = $s['versionId'];
+        $lab1 = $this->crearUsuario()['id'];
+        $lab2 = $this->crearUsuario()['id'];
+        $doc = json_decode((string) file_get_contents(__DIR__ . '/../fixtures/doc-listas.json'), true);
+        $reemplazo = ['slug' => 'cap-1', 'titulo' => 'Otro título', 'orden' => 9, 'texOriginal' => '\\section{Nuevo}', 'docJson' => $doc];
+
+        // Cada tipo de aporte por separado bloquea el reemplazo, en cualquier etapa.
+        $aportes = [
+            'copias_laboratorio' => "INSERT INTO copias_laboratorio (usuario_id, capitulo_id, version_base_id, doc_json) VALUES ($lab1, $cap, $ver, '{}')",
+            'revisiones_copia' => "INSERT INTO revisiones_copia (usuario_id, capitulo_id, doc_json) VALUES ($lab1, $cap, '{}')",
+            'sugerencias' => "INSERT INTO sugerencias (usuario_id, capitulo_id, version_base_id, uid, bloque_id, tipo, datos) VALUES ($lab1, $cap, $ver, 'u1:a', 'b1', 'contenido', '{}')",
+            'comentarios' => "INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto) VALUES ($lab1, $cap, 'b1', '{}', 'hola')",
+        ];
+        foreach (['preparacion' => null, 'consulta' => 'abrirConsulta', 'edicion_final' => 'cerrarConsulta'] as $etapa => $paso) {
+            if ($paso !== null) {
+                $this->$paso();
+            }
+            foreach ($aportes as $tabla => $sql) {
+                self::$bd->exec($sql);
+                $r = $c->post('/admin/capitulos', $reemplazo);
+                self::assertSame(409, $r->estado, "$etapa/$tabla: " . $r->cuerpo());
+                self::assertSame('operacion_no_permitida', $r->datos['error']['codigo']);
+                self::assertSame('1 laboratorio ya trabajó en este capítulo; no se puede reemplazar el texto.', $r->datos['error']['mensaje'], $tabla);
+                self::$bd->exec("DELETE FROM $tabla");
+            }
+        }
+
+        // Varios laboratorios con aportes de distinto tipo: cada uno cuenta una vez.
+        self::$bd->exec($aportes['copias_laboratorio']);
+        self::$bd->exec($aportes['comentarios']);
+        self::$bd->exec("INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto) VALUES ($lab2, $cap, 'b1', '{}', 'chao')");
+        $r = $c->post('/admin/capitulos', $reemplazo);
+        self::assertSame(409, $r->estado);
+        self::assertSame('2 laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto.', $r->datos['error']['mensaje']);
+        self::$bd->exec('DELETE FROM copias_laboratorio');
+        self::$bd->exec('DELETE FROM comentarios');
+
+        // Solo una versión final (ningún laboratorio): también bloquea.
+        self::$bd->exec("INSERT INTO versiones_capitulo (capitulo_id, tipo, doc_json, tex_final) VALUES ($cap, 'final', '{}', 'x')");
+        $r = $c->post('/admin/capitulos', $reemplazo);
+        self::assertSame(409, $r->estado);
+        self::assertSame('operacion_no_permitida', $r->datos['error']['codigo']);
+        self::assertStringContainsString('versión final', $r->datos['error']['mensaje']);
+        self::assertStringContainsString('no se puede reemplazar el texto', $r->datos['error']['mensaje']);
+
+        // Nada cambió: ni versiones base, ni título u orden, ni auditoría de subida.
+        self::assertSame(1, (int) self::$bd->query("SELECT COUNT(*) FROM versiones_capitulo WHERE tipo = 'base'")->fetchColumn());
+        self::assertSame(['orden' => 1, 'titulo' => 'Capítulo 1', 'slug' => 'cap-1'], $this->filaTipada($cap));
+        self::assertCount(1, $this->auditoria('subir_capitulo'));
     }
 
     public function test_borrar_con_aportes_da_409(): void

@@ -139,6 +139,19 @@ final class Capitulos
         return (bool) $st->fetchColumn();
     }
 
+    /** Cuántos laboratorios (usuarios distintos) tienen copias, instantáneas, sugerencias o comentarios en el capítulo. */
+    private function laboratoriosConAportes(int $id): int
+    {
+        $st = $this->bd->prepare(
+            'SELECT COUNT(*) FROM (SELECT usuario_id FROM copias_laboratorio WHERE capitulo_id = ?'
+            . ' UNION SELECT usuario_id FROM revisiones_copia WHERE capitulo_id = ?'
+            . ' UNION SELECT usuario_id FROM sugerencias WHERE capitulo_id = ?'
+            . ' UNION SELECT usuario_id FROM comentarios WHERE capitulo_id = ?) AS t'
+        );
+        $st->execute([$id, $id, $id, $id]);
+        return (int) $st->fetchColumn();
+    }
+
     /** Id de la versión base vigente (la última de tipo `base`), o null si el capítulo no existe. */
     public function versionBaseVigente(int $capituloId): ?int
     {
@@ -227,7 +240,9 @@ final class Capitulos
     /**
      * Crea el capítulo (o actualiza título y orden si el slug ya existe) y le añade una versión base.
      * La versión base vigente es la última de tipo `base`.
-     * @return array{id:int,versionId:int}
+     * Reemplazar el texto de un capítulo existente solo se permite si no tiene aportes (ver tieneAportes):
+     * la fila se bloquea (FOR UPDATE) antes de comprobarlo, igual que en borrarSinAportes.
+     * @return array{estado:'subido',id:int,versionId:int}|array{estado:'con_aportes',laboratorios:int}
      */
     public function subirBase(string $slug, string $titulo, int $orden, string $texOriginal, string $docJson, int $usuarioId): array
     {
@@ -241,6 +256,11 @@ final class Capitulos
                 $id = (int) $this->bd->lastInsertId();
             } else {
                 $id = (int) $id;
+                if ($this->tieneAportes($id)) {
+                    $laboratorios = $this->laboratoriosConAportes($id);
+                    $this->bd->rollBack();
+                    return ['estado' => 'con_aportes', 'laboratorios' => $laboratorios];
+                }
                 $this->bd->prepare('UPDATE capitulos SET orden = ?, titulo = ? WHERE id = ?')->execute([$orden, $titulo, $id]);
             }
             $this->bd->prepare("INSERT INTO versiones_capitulo (capitulo_id, tipo, tex_original, doc_json, creado_por) VALUES (?, 'base', ?, ?, ?)")
@@ -253,6 +273,6 @@ final class Capitulos
             }
             throw $e;
         }
-        return ['id' => $id, 'versionId' => $versionId];
+        return ['estado' => 'subido', 'id' => $id, 'versionId' => $versionId];
     }
 }
