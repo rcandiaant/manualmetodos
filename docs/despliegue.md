@@ -41,7 +41,7 @@ Solo `public/` queda visible desde Internet. Todo lo demás, incluido el `.env` 
 > │   └── manual.renalasch.cl/   (raíz web del subdominio)
 > │       ├── index.html  assets/  .htaccess   (del paquete, con la guardia de host)
 > │       ├── index.php                         (el puente; nunca se reemplaza)
-> │       └── .user.ini                         (límites de PHP, paso 6.1)
+> │       └── .user.ini                         (límites de PHP, paso 6.1; no existe con CloudLinux)
 > └── manualmetodos/
 >     ├── public/index.php   (la API de verdad; la carga el puente)
 >     ├── bin/  config/  migraciones/  src/  vendor/  composer.json
@@ -97,7 +97,7 @@ Solo `public/` queda visible desde Internet. Todo lo demás, incluido el `.env` 
 >    ```
 >
 >    Cualquier visita que no sea a `manual.renalasch.cl` recibe 403.
-> 4. Los límites de PHP del paso 6.1 (`.user.ini`) se crean en `/home/renalasc/public_html/manual.renalasch.cl`, que es la raíz web.
+> 4. Con **MultiPHP INI Editor**, los límites de PHP del paso 6.1 (`.user.ini`) se crean en `/home/renalasc/public_html/manual.renalasch.cl`, que es la raíz web. Con **Select PHP Version** (CloudLinux, el caso de renalasch.cl) no se crea ningún archivo ahí: es normal.
 > 5. En la prueba rápida (paso 9), `https://manual.renalasch.cl/.env` y `/composer.json` responden **404** en vez de 403: esos archivos no están en la raíz web. Es correcto.
 
 ## 3. Crear la base de datos y su usuario
@@ -197,9 +197,11 @@ Cada reinicio deja su respaldo en `var/respaldos/` y cuenta para la rotación de
 
 ### 6.1 Versión y límites
 
+> **¿MultiPHP o Select PHP Version?** Algunos cPanel traen **MultiPHP Manager** y **MultiPHP INI Editor**. Otros, con CloudLinux, traen en su lugar **Select PHP Version** (en la sección *Software*; también aparece como «Seleccionar versión de PHP»). **renalasch.cl usa Select PHP Version**: ahí no existen MultiPHP Manager ni MultiPHP INI Editor. Con Select PHP Version la versión, las extensiones y los límites se ajustan en esa misma pantalla, valen para toda la cuenta y **no se crea ningún `.user.ini`**. Las instrucciones de abajo indican las dos rutas.
+
 1. En **MultiPHP Manager**, marque `manual.renalasch.cl` y elija **PHP 8.2**, 8.3 u 8.4. Pulse **Aplicar**.
-   - Si su cPanel tiene **Seleccionar versión de PHP** (CloudLinux), use ese: elija la versión, y en **Extensiones** confirme que estén marcadas `pdo_mysql`, `mbstring` y `sodium`.
-2. En **MultiPHP INI Editor** (o en **Seleccionar versión de PHP → Opciones**), con `manual.renalasch.cl` elegido, deje:
+   - Con **Select PHP Version** (CloudLinux): elija la versión arriba de la pantalla, y en la pestaña **Extensions** confirme que estén marcadas `pdo_mysql` (o `nd_pdo_mysql`), `mbstring` y `sodium`. Si `pdo_mysql` aparece como «skipped as conflicting» porque `nd_pdo_mysql` está marcada, está bien. Si `sodium` no se deja marcar, suele venir incluida en PHP; el sitio avisa si falta.
+2. En **MultiPHP INI Editor** con `manual.renalasch.cl` elegido, o en **Select PHP Version → pestaña Options**, deje:
 
    | Opción | Valor mínimo |
    |---|---|
@@ -208,7 +210,7 @@ Cada reinicio deja su respaldo en `var/respaldos/` y cuenta para la rotación de
    | `max_execution_time` | `120` (para importar 100 usuarios de una vez) |
    | `memory_limit` | `128M` |
 
-   Pulse **Aplicar** o **Guardar**. cPanel guarda estos valores en un archivo `.user.ini` (o `php.ini`) dentro de `manualmetodos/public/`. **No lo borre nunca**, tampoco al actualizar (paso 10).
+   Con MultiPHP INI Editor, pulse **Aplicar**: cPanel guarda estos valores en un archivo `.user.ini` (o `php.ini`) dentro de `manualmetodos/public/`. **No lo borre nunca**, tampoco al actualizar (paso 10). En **Options** de Select PHP Version cada valor se guarda solo al cambiarlo y no se crea ningún archivo.
 
 Si al PHP le falta alguna extensión, el sitio muestra un mensaje que la nombra.
 
@@ -352,7 +354,7 @@ Recibirá un `.zip` nuevo, y a veces un `.sql`. La regla es esta:
 | Se reemplaza | **No se toca nunca** |
 |---|---|
 | En `manualmetodos/`: `bin/`, `config/`, `migraciones/`, `src/`, `vendor/`, `composer.json` y `.env.produccion.example` | `.env` (sus claves y la conexión) y `var/` (sesiones y respaldos) |
-| En `manualmetodos/public/`: **solo** `assets/`, `index.html`, `index.php` y `.htaccess` | Todo lo demás que haya en `public/`: `.user.ini` o `php.ini` (los límites del paso 6.1), `.well-known/` (el certificado) y `error_log` |
+| En `manualmetodos/public/`: **solo** `assets/`, `index.html`, `index.php` y `.htaccess` | Todo lo demás que haya en `public/`: `.user.ini` o `php.ini` si existen (los límites del paso 6.1, solo con MultiPHP INI Editor), `.well-known/` (el certificado) y `error_log` |
 
 **Nunca borre `public/` entera:** ahí cPanel guarda sus propios archivos, y si se pierden, los límites de PHP vuelven en silencio a los del hosting (los capítulos grandes dejarían de subir días después).
 
@@ -377,8 +379,8 @@ Hágalo en un horario tranquilo: entre los puntos 4 y 6 el sitio queda fuera de 
    2. Entre a `/home/USUARIO/nueva/manualmetodos/public`, seleccione `assets`, `index.html`, `index.php` y `.htaccess` → **Mover** → `/home/USUARIO/manualmetodos/public`.
    3. Confirme que en `manualmetodos/public` están `.htaccess` (con los archivos ocultos visibles) y, si existían antes, `.user.ini` o `php.ini`.
 6. Revise PHP:
-   - En **MultiPHP Manager**, vuelva a aplicar la versión de PHP del subdominio (paso 6.1). cPanel a veces guarda la versión dentro de `public/.htaccess`, y ese archivo acaba de reemplazarse.
-   - En **MultiPHP INI Editor** (o **Seleccionar versión de PHP → Opciones**), confirme que los cuatro límites del paso 6.1 siguen con sus valores. Si alguno volvió al valor del hosting, corríjalo.
+   - En **MultiPHP Manager**, vuelva a aplicar la versión de PHP del subdominio (paso 6.1). cPanel a veces guarda la versión dentro de `public/.htaccess`, y ese archivo acaba de reemplazarse. Con **Select PHP Version** basta confirmar que siga elegida la versión 8.2 o superior.
+   - En **MultiPHP INI Editor** (o **Select PHP Version → Options**), confirme que los cuatro límites del paso 6.1 siguen con sus valores. Si alguno volvió al valor del hosting, corríjalo.
 7. Si la versión trae un `.sql`, impórtelo como en el paso 4 **solo si las notas de la versión lo piden**.
 8. Repita la prueba rápida (paso 9).
 9. Si todo funciona, borre la carpeta `/home/USUARIO/nueva` y el `.zip`. Deje las carpetas `…-anterior` hasta la próxima actualización: no estorban y permiten volver atrás.
@@ -397,7 +399,7 @@ Hágalo en un horario tranquilo: entre los puntos 4 y 6 el sitio queda fuera de 
 >   3. Para el cliente, use un zip para conservar las carpetas: en `/home/renalasc/nueva/manualmetodos/public` seleccione `index.html`, `assets` y `.htaccess` → **Comprimir** → `cliente.zip`, muévalo a `/home/renalasc/public_html/manual.renalasch.cl`, **Extraer** ahí y borre `cliente.zip`.
 >   4. Edite el `.htaccess` recién copiado a la raíz web y vuelva a agregar, **justo después de `RewriteEngine On`**, las 3 líneas de la guardia de host: las que copió en 4.3 o, si no las tenía, las del paso 2 de la variante (punto 3). Agréguelas siempre, aunque antes no estuvieran. Sin ellas, la carpeta respondería también desde el sitio principal.
 >   5. Confirme que en la raíz web siguen el `index.php` puente y, si existían, `.user.ini` o `php.ini`.
-> - **6. Revise PHP.** Vuelva a aplicar la versión de PHP del subdominio en **MultiPHP Manager**, porque el `.htaccess` de la raíz web se reemplazó y cPanel puede guardar ahí la versión. Los límites (`.user.ini`) viven en la raíz web, `/home/renalasc/public_html/manual.renalasch.cl`: confírmelos en **MultiPHP INI Editor**.
+> - **6. Revise PHP.** En renalasch.cl (Select PHP Version): confirme que siga elegida PHP 8.2 o superior y que los cuatro límites de la pestaña **Options** sigan como en el paso 6.1. Con MultiPHP: vuelva a aplicar la versión en **MultiPHP Manager**, porque el `.htaccess` de la raíz web se reemplazó y cPanel puede guardar ahí la versión, y confirme los límites (`.user.ini` en la raíz web) en **MultiPHP INI Editor**.
 > - En la prueba rápida (paso 9), `/.env` y `/composer.json` responden **404** en esta variante, no 403. Es correcto.
 > - Pida a los laboratorios que recarguen la página (o la cierren y la vuelvan a abrir): una pestaña abierta con el cliente anterior puede fallar al comentar hasta recargar.
 > - Al terminar, borre `/home/renalasc/nueva` y el `.zip`. Deje `cliente-anterior` y `public-anterior` hasta la próxima actualización.
@@ -409,14 +411,14 @@ Si la prueba rápida falla con la versión nueva y no hay una solución inmediat
 1. En `/home/USUARIO/manualmetodos`, renombre las carpetas nuevas como `…-fallida`: `bin` → `bin-fallida`, `config` → `config-fallida`, `migraciones` → `migraciones-fallida`, `src` → `src-fallida`, `vendor` → `vendor-fallida` y `composer.json` → `composer.json-fallida`.
 2. Renombre las anteriores a su nombre original: `bin-anterior` → `bin`, `config-anterior` → `config`, `migraciones-anterior` → `migraciones`, `src-anterior` → `src`, `vendor-anterior` → `vendor` y `composer.json-anterior` → `composer.json`.
 3. En `public`, borre `assets`, `index.html`, `index.php` y `.htaccess` (los nuevos). Después entre a `public-anterior`, seleccione todo su contenido → **Mover** → `/home/USUARIO/manualmetodos/public`.
-4. Vuelva a aplicar la versión de PHP en **MultiPHP Manager** (paso 6.1).
+4. Vuelva a aplicar la versión de PHP en **MultiPHP Manager**, o confírmela en **Select PHP Version** (paso 6.1).
 5. Si en el punto 7 de 10.1 importó un `.sql`, restaure el respaldo previo del punto 1 (paso 11).
 6. Repita la prueba rápida (paso 9) y avise al equipo técnico, con el correo del cron o el `error_log` si los hay.
 
 > **Si su raíz web está dentro de public_html (variante con index.php puente).** Los puntos 1, 2, 5 y 6 son iguales. Cambian el 3 y el 4:
 >
 > - **3.** En `/home/renalasc/manualmetodos/public` borre el `index.php` nuevo y mueva ahí el de `/home/renalasc/manualmetodos/public-anterior`. En `/home/renalasc/public_html/manual.renalasch.cl` borre **solo** `index.html`, `assets` y `.htaccess` (los nuevos) y mueva ahí el contenido de `/home/renalasc/cliente-anterior`. Si ese `.htaccess` anterior no tenía la guardia de host, agréguela como en el paso 2 de la variante. **El `index.php` puente no se toca.**
-> - **4.** Vuelva a aplicar la versión de PHP en **MultiPHP Manager** y confirme los límites de `.user.ini` en la raíz web.
+> - **4.** Confirme la versión y los límites en **Select PHP Version → Options** (renalasch.cl). Con MultiPHP: vuelva a aplicar la versión en **MultiPHP Manager** y confirme los límites de `.user.ini` en la raíz web.
 
 Cuando el problema esté resuelto, borre las carpetas `…-fallida`.
 
