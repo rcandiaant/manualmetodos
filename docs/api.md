@@ -335,8 +335,17 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 **`GET /admin/usuarios`** devuelve `[{"id", "nombre", "laboratorio", "correo", "roles", "activo"}]`, ordenado por laboratorio, nombre e id. El correo va descifrado.
 
 **`POST /admin/usuarios/importar`** con `{"csv": "nombre,correo,laboratorio\nAna,ana@lab.cl,Lab Norte"}`:
-- El encabezado debe ser exactamente `nombre,correo,laboratorio`, sin distinguir mayúsculas. El separador puede ser `,` o `;` y se detecta en la primera línea.
-- Se aceptan un BOM UTF-8 opcional y comillas CSV. El texto debe ser UTF-8, y las líneas en blanco se ignoran.
+- Cada línea tiene tres campos: nombre, correo y laboratorio.
+- **El encabezado es opcional.** Si la primera línea no vacía, normalizada, es `nombre<sep>correo<sep>laboratorio`, se salta. Normalizar significa recortar espacios en cada celda, pasar a minúsculas y quitar caracteres invisibles, así que también vale ` Nombre ; Correo ; Laboratorio `. Si no coincide, la primera línea es de datos.
+- **El separador se detecta en la primera línea no vacía**, sea encabezado o datos. Se prueban tabulador, `;` y `,` en ese orden, respetando comillas, y gana el primero que da exactamente 3 campos; por ejemplo, `"Soto; Luis",l@lab.cl,L` usa `,`. Si ninguno da 3, se usa el primero que aparezca en la línea (tabulador, si no `;`, si no `,`). Así se pueden pegar celdas copiadas desde Excel, que llegan separadas por tabulador.
+- Se aceptan un BOM UTF-8 opcional y comillas CSV (`"…"`). El texto debe ser UTF-8. Las líneas en blanco se ignoran, y también las que solo tienen separadores, espacios o caracteres invisibles (por ejemplo `\t\t` de una fila vacía de Excel, o `;;`).
+- Cada campo se limpia antes de validarse:
+  - se recortan los espacios de los extremos, incluidos los espacios Unicode (`\s`, `\p{Z}`);
+  - NBSP (U+00A0) pasa a espacio normal;
+  - se quitan BOM (U+FEFF), U+200B/U+200C/U+200D y demás caracteres de formato Unicode (`\p{Cf}`);
+  - se quita un par de comillas tipográficas (`“…”`, `‘…’`, `«…»`) que envuelva el campo;
+  - el correo se guarda en minúsculas.
+- Los números de línea de los errores son líneas físicas del texto enviado, contando el encabezado si lo hay y las líneas en blanco iniciales.
 - **Máximo 100 filas por importación.**
 - Si hay cualquier línea inválida o un correo repetido (en el CSV o ya existente), responde 400 con los números de línea física y no crea ninguna cuenta.
 - Responde 201 `[{"correo": "ana@lab.cl", "clave": "Xy7…"}]`. Las claves (16 caracteres) **se muestran una sola vez**.

@@ -124,7 +124,7 @@ Una vez abierta la consulta ya no se pueden subir capítulos.
 
 ### Usuarios
 
-- **Importar** cuentas con un CSV de hasta 100 filas, con el encabezado exacto `nombre,correo,laboratorio`. Si una fila tiene un error, no se crea ninguna cuenta y se indica la línea.
+- **Importar** hasta 100 cuentas por vez, con tres columnas: nombre, correo y laboratorio. Lo más simple es seleccionar esas tres columnas en Excel, copiarlas y pegarlas en el cuadro. También puede pegar o elegir un CSV separado por `;`, `,` o tabulador. La fila de encabezado `nombre,correo,laboratorio` es opcional. Los espacios sobrantes y los caracteres invisibles que a veces trae Excel se limpian solos. Si una fila tiene un error, no se crea ninguna cuenta y se indica la línea.
 - Las claves nuevas **se muestran una sola vez**. Cópielas o use **Descargar CSV** y entrégueselas a cada persona por un canal seguro.
 - Las cuentas importadas son de laboratorio. Para el revisor, cambie los roles y pulse **Guardar roles**. Una persona puede tener varios roles.
 - **Desactivar** impide entrar. **Regenerar clave** entrega una clave nueva y cierra al instante todas las sesiones abiertas de esa cuenta; úselo, por ejemplo, si cambia el responsable de un laboratorio.

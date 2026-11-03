@@ -7,7 +7,7 @@
  */
 import { boton, el } from '../../editor/ui';
 import { ErrorApi, type Api } from '../api';
-import { celdaCsv } from '../csv';
+import { celdaCsv, esEncabezadoUsuarios, lineaVacia } from '../csv';
 import type { Vista } from '../router';
 import type { ClaveRegenerada, CuentaImportada, Rol, UsuarioAdmin, UsuarioCambio } from '../tipos-api';
 import { cabeceraAdmin, cajaError, mensajeError, mostrar } from './comun';
@@ -34,10 +34,14 @@ export function lineasDeCsv(mensaje: string): string[] {
   return res;
 }
 
-/** Filas de datos no vacías del CSV (sin contar el encabezado); aproximado, para el tope de 100. */
-function contarFilas(csv: string): number {
-  const lineas = csv.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim() !== '');
-  return Math.max(0, lineas.length - 1);
+/**
+ * Filas de datos no vacías del CSV, sin contar el encabezado opcional (que se detecta igual que en
+ * el servidor); aproximado, para el tope de 100. El texto se envía al servidor sin tocar.
+ */
+export function contarFilas(csv: string): number {
+  const lineas = csv.split(/\r?\n/).filter((l) => !lineaVacia(l));
+  const primera = lineas[0];
+  return primera !== undefined && esEncabezadoUsuarios(primera) ? lineas.length - 1 : lineas.length;
 }
 
 export function vistaUsuarios(api: Api): VistaUsuarios {
@@ -56,7 +60,7 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
   const texto = el('textarea', {
     rows: '6',
     'aria-label': 'CSV de usuarios',
-    placeholder: 'nombre,correo,laboratorio\nAna Pérez,ana@lab.cl,Laboratorio Norte',
+    placeholder: 'Pegue aquí las celdas copiadas de Excel o escriba (encabezado opcional):\nnombre;correo;laboratorio\nAna Pérez;ana@lab.cl;Laboratorio Norte',
   });
 
   const avisoCopia = el('p', { class: 'copiado', role: 'status' });
@@ -234,7 +238,7 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
     erroresCsv.replaceChildren();
     listo = (async () => {
       if (csv.trim() === '') {
-        erroresCsv.textContent = 'Pegue o elija un CSV con el encabezado nombre,correo,laboratorio.';
+        erroresCsv.textContent = 'Pegue las filas (nombre, correo, laboratorio) o elija un archivo CSV.';
         erroresCsv.hidden = false;
         return;
       }
@@ -293,7 +297,11 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
             'section',
             {},
             el('h2', {}, 'Importar usuarios'),
-            el('p', { class: 'ayuda' }, `Encabezado nombre,correo,laboratorio (separador , o ;), hasta ${MAX_FILAS} filas. Pegue el CSV o elija un archivo.`),
+            el(
+              'p',
+              { class: 'ayuda' },
+              `Tres columnas: nombre, correo, laboratorio; hasta ${MAX_FILAS} filas. Puede pegar las celdas copiadas directamente desde Excel, o un CSV separado por «;», «,» o tabulador. El encabezado es opcional. También puede elegir un archivo.`,
+            ),
             texto,
             archivo,
             el('div', { class: 'acciones' }, boton('Importar', () => void importar(texto.value), 'primario')),

@@ -85,7 +85,7 @@ final class AdminTest extends TestCase
         self::assertSame(200, $l->estado);
         $correos = array_column($l->datos, 'correo');
         self::assertContains('ana@lab.cl', $correos);
-        self::assertContains('Luis@lab.cl', $correos);
+        self::assertContains('luis@lab.cl', $correos); // el correo se guarda en minúsculas
         self::assertStringNotContainsString($clave, $l->cuerpo());
         self::assertStringNotContainsString('clave_hash', $l->cuerpo());
         self::assertStringNotContainsString('argon2', $l->cuerpo());
@@ -121,10 +121,11 @@ final class AdminTest extends TestCase
         self::assertNull($this->cuenta('nuevo@lab.cl'));
     }
 
-    public function test_importar_csv_rechaza_encabezado_correo_y_campos_invalidos(): void
+    public function test_importar_csv_rechaza_correo_y_campos_invalidos(): void
     {
         [$c] = $this->admin();
         foreach ([
+            // El encabezado es opcional: uno en otro orden no se reconoce y es la línea 1 de datos (correo «nombre», inválido).
             "correo,nombre,laboratorio\nA,a@lab.cl,L\n",
             "nombre,correo,laboratorio\nA,no-es-correo,L\n",
             "nombre,correo,laboratorio\n,a@lab.cl,L\n",
@@ -149,6 +150,151 @@ final class AdminTest extends TestCase
         $u = array_values(array_filter($l, fn ($x) => $x['correo'] === 'pedro@lab.cl'))[0];
         self::assertSame('Ñandú, Pedro', $u['nombre']);
         self::assertSame('Lab; Central', $u['laboratorio']);
+    }
+
+    /** @return array<string, array<string, mixed>> usuarios listados, por correo */
+    private function listadoPorCorreo(ClienteApi $c): array
+    {
+        return array_column($c->get('/admin/usuarios')->datos, null, 'correo');
+    }
+
+    public function test_importar_csv_el_encabezado_ya_no_es_obligatorio(): void
+    {
+        [$c] = $this->admin();
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "Ana Pérez;ana@lab.cl;Lab Norte\nLuis Soto;luis@lab.cl;Lab Sur\n"]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame(['ana@lab.cl', 'luis@lab.cl'], array_column($r->datos, 'correo'));
+        $u = $this->listadoPorCorreo($c);
+        self::assertSame('Ana Pérez', $u['ana@lab.cl']['nombre']);
+        self::assertSame('Lab Sur', $u['luis@lab.cl']['laboratorio']);
+    }
+
+    public function test_importar_csv_encabezado_con_espacios_y_mayusculas_se_salta(): void
+    {
+        [$c] = $this->admin();
+        $csv = " Nombre ; Correo ; Laboratorio \n  Ana Pérez ;  ANA@Lab.CL ; Lab Norte  \n";
+        $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame(['ana@lab.cl'], array_column($r->datos, 'correo'));
+        $u = $this->listadoPorCorreo($c)['ana@lab.cl'];
+        self::assertSame('Ana Pérez', $u['nombre']);
+        self::assertSame('Lab Norte', $u['laboratorio']);
+    }
+
+    public function test_importar_csv_pegado_desde_excel_con_tabuladores(): void
+    {
+        [$c] = $this->admin();
+        // Excel copia las celdas separadas por tabulador; las comas y «;» dentro de una celda son texto.
+        $csv = "Nombre\tCorreo\tLaboratorio\r\nAna Pérez\tana@lab.cl\tLab Norte\r\nSoto, Luis\tluis@lab.cl\tLab; Sur\r\n";
+        $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        $u = $this->listadoPorCorreo($c);
+        self::assertSame('Soto, Luis', $u['luis@lab.cl']['nombre']);
+        self::assertSame('Lab; Sur', $u['luis@lab.cl']['laboratorio']);
+
+        // Sin encabezado también.
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "Eva\teva@lab.cl\tLab Este\n"]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame('Lab Este', $this->listadoPorCorreo($c)['eva@lab.cl']['laboratorio']);
+    }
+
+    public function test_importar_csv_con_comas_sin_encabezado(): void
+    {
+        [$c] = $this->admin();
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "Ana,ana@lab.cl,Lab Norte\n\"Soto; Luis\",luis@lab.cl,\"Lab, Sur\"\n"]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        $u = $this->listadoPorCorreo($c);
+        self::assertSame('Soto; Luis', $u['luis@lab.cl']['nombre']);
+        self::assertSame('Lab, Sur', $u['luis@lab.cl']['laboratorio']);
+    }
+
+    public function test_importar_csv_limpia_caracteres_invisibles_y_comillas_tipograficas(): void
+    {
+        [$c] = $this->admin();
+        // BOM + espacio de ancho cero en el encabezado; NBSP, U+200B/C/D, guion blando (\p{Cf}) y comillas tipográficas en los datos.
+        $csv = "\u{FEFF}\u{200B}nombre;correo\u{00A0};laboratorio\n"
+            . "\u{00A0}Ana\u{00A0}Pérez\u{200B};\u{200D}Ana@Lab.cl\u{00A0};Lab\u{200C} Norte\u{FEFF}\n"
+            . "“Luis Soto”;‘luis\u{00AD}@lab.cl’;«Lab Sur»\n";
+        $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame(['ana@lab.cl', 'luis@lab.cl'], array_column($r->datos, 'correo'));
+        $u = $this->listadoPorCorreo($c);
+        self::assertSame('Ana Pérez', $u['ana@lab.cl']['nombre']);
+        self::assertSame('Lab Norte', $u['ana@lab.cl']['laboratorio']);
+        self::assertSame('Luis Soto', $u['luis@lab.cl']['nombre']);
+        self::assertSame('Lab Sur', $u['luis@lab.cl']['laboratorio']);
+    }
+
+    public function test_importar_csv_sin_encabezado_numera_lineas_desde_la_primera(): void
+    {
+        [$c] = $this->admin();
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "Ana,ana@lab.cl,L\nMalo,no-correo,L\nDos,campos@lab.cl\nAna2,ANA@lab.cl,L\n"]);
+        self::assertSame(400, $r->estado);
+        self::assertSame(
+            'No se creó ninguna cuenta; líneas con datos inválidos: 2, 3; correos repetidos o ya registrados en las líneas: 4.',
+            $r->datos['error']['mensaje'],
+        );
+        // Con líneas en blanco al inicio, siguen contando.
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "\n \nAna;ana@lab.cl;L\nMalo;no-correo;L\n"]);
+        self::assertSame(400, $r->estado);
+        self::assertSame('No se creó ninguna cuenta; líneas con datos inválidos: 4.', $r->datos['error']['mensaje']);
+        self::assertSame(1, (int) self::$bd->query('SELECT COUNT(*) FROM usuarios')->fetchColumn());
+    }
+
+    public function test_importar_csv_linea_con_dos_campos_sigue_siendo_error(): void
+    {
+        [$c] = $this->admin();
+        foreach (["Ana;ana@lab.cl\n" => 1, "Ana\tana@lab.cl\n" => 1, "nombre,correo,laboratorio\nAna,ana@lab.cl\n" => 2] as $csv => $linea) {
+            $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+            self::assertSame(400, $r->estado, $csv);
+            self::assertStringContainsString("datos inválidos: $linea.", $r->datos['error']['mensaje']);
+        }
+        self::assertSame(1, (int) self::$bd->query('SELECT COUNT(*) FROM usuarios')->fetchColumn());
+    }
+
+    public function test_importar_csv_separador_es_el_que_da_tres_campos(): void
+    {
+        [$c] = $this->admin();
+        // La primera línea tiene «;» dentro de comillas, pero con «,» da exactamente 3 campos.
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "\"Soto; Luis\",l@lab.cl,L\nAna,ana@lab.cl,Lab\n"]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame('Soto; Luis', $this->listadoPorCorreo($c)['l@lab.cl']['nombre']);
+    }
+
+    public function test_importar_csv_lineas_solo_con_separadores_se_ignoran(): void
+    {
+        [$c] = $this->admin();
+        // Filas vacías de Excel (`\t\t`) o de planilla (`;;`), también al inicio, con espacios o invisibles.
+        $csv = ";;\n\t\t\nAna\tana@lab.cl\tLab\n\t\t\n \t\u{200B}\t\u{00A0}\nLuis\tluis@lab.cl\tLab\n\t\t\n";
+        $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame(['ana@lab.cl', 'luis@lab.cl'], array_column($r->datos, 'correo'));
+
+        $r = $c->post('/admin/usuarios/importar', ['csv' => "Eva;eva@lab.cl;L\n;;\nMalo;no-correo;L\n"]);
+        self::assertSame(400, $r->estado);
+        self::assertSame('No se creó ninguna cuenta; líneas con datos inválidos: 3.', $r->datos['error']['mensaje']);
+    }
+
+    public function test_importar_csv_recorta_espacios_unicode_como_el_cliente(): void
+    {
+        [$c] = $this->admin();
+        // U+2003 (espacio eme) y U+3000 (espacio ideográfico) alrededor de las celdas, también en el encabezado.
+        $csv = "Nombre\u{2003};\u{3000}Correo;Laboratorio\u{2003}\n\u{2003}Ana\u{3000};ana@lab.cl\u{2003};Lab\n";
+        $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+        self::assertSame(201, $r->estado, $r->cuerpo());
+        self::assertSame('Ana', $this->listadoPorCorreo($c)['ana@lab.cl']['nombre']);
+    }
+
+    public function test_csv_sin_encabezado_con_mas_de_100_filas_da_400(): void
+    {
+        [$c] = $this->admin();
+        $csv = '';
+        for ($i = 0; $i < 101; $i++) {
+            $csv .= "N$i;u$i@lab.cl;L\n";
+        }
+        $r = $c->post('/admin/usuarios/importar', ['csv' => $csv]);
+        self::assertSame(400, $r->estado);
+        self::assertStringContainsString('100', $r->datos['error']['mensaje']);
     }
 
     public function test_regenerar_clave_invalida_la_anterior(): void

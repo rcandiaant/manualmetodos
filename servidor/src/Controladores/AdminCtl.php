@@ -283,7 +283,46 @@ final class AdminCtl
     }
 
     /**
-     * Lee el CSV: encabezado exacto `nombre,correo,laboratorio` (o con `;`), UTF-8 con o sin BOM.
+     * Limpia un campo del CSV: NBSP pasa a espacio; se quitan los caracteres de formato invisibles
+     * (\p{Cf}: BOM, U+200B/C/D, guion blando…), los espacios de los extremos y un par de comillas
+     * tipográficas que envuelva el campo.
+     */
+    private static function limpiarCampo(?string $v): string
+    {
+        $v = str_replace("\u{00A0}", ' ', (string) $v);
+        $v = self::recortar(preg_replace('/\p{Cf}/u', '', $v) ?? $v);
+        if (preg_match('/\A[“”„‟‘’‚‛«»‹›](.*)[“”„‟‘’‚‛«»‹›]\z/us', $v, $m) === 1) {
+            $v = self::recortar($m[1]);
+        }
+        return $v;
+    }
+
+    /** Recorta espacios Unicode de los extremos (como `String.prototype.trim` del cliente). */
+    private static function recortar(string $v): string
+    {
+        return preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $v) ?? trim($v);
+    }
+
+    /**
+     * Separador según la primera línea: el primer candidato (tabulador, `;`, `,`) con el que
+     * `str_getcsv` da exactamente 3 campos; si ninguno, el primero que aparezca en la línea.
+     */
+    private static function separadorCsv(string $linea): string
+    {
+        foreach (["\t", ';', ','] as $candidato) {
+            if (count(str_getcsv($linea, $candidato, '"', '')) === 3) {
+                return $candidato;
+            }
+        }
+        return str_contains($linea, "\t") ? "\t" : (str_contains($linea, ';') ? ';' : ',');
+    }
+
+    /**
+     * Lee el CSV de usuarios (UTF-8, con o sin BOM). El encabezado `nombre,correo,laboratorio` es opcional:
+     * se salta si la primera línea no vacía, normalizada, coincide con él. El separador se detecta en esa
+     * misma línea (`separadorCsv`: tabulador de Excel, `;` o `,`). Cada campo se limpia (espacios,
+     * caracteres invisibles, comillas tipográficas) y el correo se pasa a minúsculas. Las líneas con solo
+     * separadores, espacios o invisibles (filas vacías de Excel) se ignoran.
      * Si hay líneas inválidas o correos duplicados (en el CSV o ya existentes), 400 con la lista de líneas.
      * @return list<array{nombre:string,correo:string,laboratorio:string}>
      */
@@ -295,23 +334,24 @@ final class AdminCtl
         if (!mb_check_encoding($csv, 'UTF-8')) {
             throw Entrada::invalido('csv', 'debe estar en UTF-8');
         }
-        // Líneas en blanco antes del encabezado: se saltan, pero cuentan para los números de línea.
+        // Líneas en blanco (o solo con separadores, espacios o invisibles) antes de la primera: se saltan,
+        // pero cuentan para los números de línea.
         $desfase = 0;
-        if (preg_match('/\A(?:[ \t]*\r?\n)+/', $csv, $m) === 1) {
+        if (preg_match('/\A(?:[\t;,\p{Z}\p{Cf}]*\r?\n)+/u', $csv, $m) === 1) {
             $desfase = substr_count($m[0], "\n");
             $csv = substr($csv, strlen($m[0]));
         }
         $primera = rtrim(strtok($csv, "\n") ?: '', "\r");
-        $sep = match (strtolower(trim($primera))) {
-            'nombre,correo,laboratorio' => ',',
-            'nombre;correo;laboratorio' => ';',
-            default => throw Entrada::invalido('csv', 'el encabezado debe ser exactamente «nombre,correo,laboratorio» (o con «;»)'),
-        };
+        $sep = self::separadorCsv($primera);
+        $celdas = array_map(fn ($v) => mb_strtolower(self::limpiarCampo($v)), str_getcsv($primera, $sep, '"', ''));
+        $conEncabezado = $celdas === ['nombre', 'correo', 'laboratorio'];
 
         $flujo = fopen('php://temp', 'r+');
         fwrite($flujo, $csv);
         rewind($flujo);
-        fgetcsv($flujo, null, $sep, '"', ''); // encabezado
+        if ($conEncabezado) {
+            fgetcsv($flujo, null, $sep, '"', '');
+        }
         $filas = [];
         $invalidas = [];
         $duplicadas = [];
@@ -323,8 +363,9 @@ final class AdminCtl
             if ($reg === false) {
                 break;
             }
-            if ($reg === [null]) {
-                continue; // línea en blanco
+            $reg = array_map(fn ($v) => self::limpiarCampo($v), $reg);
+            if (self::limpiarCampo(str_replace(["\t", ';', ','], '', implode('', $reg))) === '') {
+                continue; // línea en blanco o solo con separadores, espacios o invisibles (fila vacía de Excel)
             }
             if (count($filas) + count($invalidas) + count($duplicadas) >= self::MAX_FILAS_CSV) {
                 fclose($flujo);
@@ -334,7 +375,8 @@ final class AdminCtl
                 $invalidas[] = $linea;
                 continue;
             }
-            [$nombre, $correo, $lab] = array_map(fn ($v) => trim((string) $v), $reg);
+            [$nombre, $correo, $lab] = $reg;
+            $correo = mb_strtolower($correo);
             if ($nombre === '' || $lab === '' || mb_strlen($nombre) > 190 || mb_strlen($lab) > 190
                 || mb_strlen($correo) > 254 || filter_var($correo, FILTER_VALIDATE_EMAIL) === false) {
                 $invalidas[] = $linea;
