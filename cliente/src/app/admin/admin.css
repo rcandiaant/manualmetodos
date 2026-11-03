@@ -24,3 +24,16 @@
 .admin .inactivo { color: var(--eliminado); }
 .admin .panel-claves code { font-size: 1rem; }
 .admin .vacio { color: var(--tenue); }
+/* Lista de capítulos: orden y título editables por fila, borrado con confirmación en la página. */
+.admin .lista-capitulos .orden-capitulo { width: 6.5rem; }
+.admin .lista-capitulos .titulo-capitulo { width: 100%; min-width: 12rem; box-sizing: border-box; }
+.admin .lista-capitulos .acciones { margin: 0; }
+.admin .lista-capitulos .confirmar p { margin: 0 0 6px; }
+.admin .estado-lista { color: var(--insertado); margin: 6px 0; }
+/* Clases propias (no `peligro`, que laboratorio.css define global con fondo rojo): colores explícitos en cada estado. */
+.admin button.borrar-capitulo { background: var(--papel); color: var(--eliminado); border: 1px solid var(--eliminado); }
+.admin button.borrar-capitulo:hover:not(:disabled) { background: #fdecea; color: #a31515; border-color: #a31515; }
+.admin button.borrar-capitulo:disabled { background: var(--fondo); color: var(--tenue); border-color: var(--borde); opacity: 1; cursor: not-allowed; }
+.admin button.borrar-definitivo { background: var(--eliminado); color: #fff; border: 1px solid var(--eliminado); font-weight: 600; }
+.admin button.borrar-definitivo:hover:not(:disabled) { background: #a31515; color: #fff; border-color: #a31515; }
+.admin button.borrar-definitivo:disabled { background: var(--fondo); color: var(--tenue); border-color: var(--borde); opacity: 1; cursor: progress; }

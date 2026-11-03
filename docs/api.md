@@ -30,8 +30,8 @@ Este documento es el contrato entre el servidor PHP (`servidor/`) y el cliente (
 | 405 | `metodo_no_permitido` | la ruta existe con otro método (con cabecera `Allow`). No hay CORS: `OPTIONS` sobre una ruta existente da 405, y sobre una inexistente, 404. Un preflight de otro sitio (`Origin` ajeno o `Sec-Fetch-Site: cross-site`) da antes 403 `origen_invalido`, porque esa comprobación va antes del enrutado (§1.2) |
 | 409 | `etapa_no_permite` | escritura fuera de su etapa (ver §3) |
 | 409 | `version_obsoleta` | `PUT …/copia` con un `versionId` que ya no es la base vigente |
-| 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida de capítulo, guardado de copia). Se puede reintentar |
-| 409 | `operacion_no_permitida` | un admin intenta desactivarse o quitarse el rol `admin` a sí mismo |
+| 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida o borrado de capítulo, guardado de copia), o un borrado de capítulo que la base rechaza por un aporte recién creado. Se puede reintentar |
+| 409 | `operacion_no_permitida` | un admin intenta desactivarse o quitarse el rol `admin` a sí mismo, o borrar un capítulo que ya tiene aportes (§4.6) |
 | 413 | `cuerpo_muy_grande` | el cuerpo supera el tope de la ruta (§1.4) |
 | 415 | `tipo_no_soportado` | hay cuerpo y `Content-Type` no es `application/json` |
 | 422 | `documento_invalido` | `docJson` o los nodos de una sugerencia no cumplen el esquema del documento |
@@ -139,7 +139,7 @@ Se calculan por fecha en cada petición, con la fila única de `consulta`:
 
 | Escritura | Etapa permitida |
 |---|---|
-| `POST /admin/capitulos`, `PUT /admin/consulta` (si cambian las fechas) | preparacion (durante la consulta solo se puede **extender** el cierre, §4.6) |
+| `POST /admin/capitulos`, `DELETE /admin/capitulos/{id}`, `PUT /admin/consulta` (si cambian las fechas) | preparacion (durante la consulta solo se puede **extender** el cierre, §4.6) |
 | `PUT …/copia`, `PATCH …/sugerencias/{uid}`, `POST …/comentarios`, `PATCH`/`DELETE /comentarios/{id}` | consulta |
 | `PATCH /sugerencias/{id}`, `PATCH /comentarios/{id}/resolucion`, `PUT …/final` | edicion_final |
 
@@ -178,6 +178,8 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 | `PUT /capitulos/{id}/final` | revisor | edicion_final | 200 `{versionId}` |
 | `GET /capitulos/{id}/final` | revisor | — | `{versionId, docJson, tex}` · 404 |
 | `POST /admin/capitulos` | admin | preparacion | 201 `{id, versionId}` |
+| `PATCH /admin/capitulos/{id}` | admin | — | 200 `{id}` · 404 |
+| `DELETE /admin/capitulos/{id}` | admin | preparacion | 204 · 404 · 409 `operacion_no_permitida` si tiene aportes |
 | `GET /admin/usuarios` | admin | — | lista de usuarios |
 | `POST /admin/usuarios/importar` | admin | — | 201 `[{correo, clave}]` |
 | `POST /admin/usuarios/{id}/clave` | admin | — | 200 `{clave}` |
@@ -313,6 +315,22 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - Responde 201 `{"id": 3, "versionId": 7}`.
 - Si el slug ya existe, actualiza `titulo` y `orden` y crea una nueva versión base.
 - Dos subidas simultáneas del mismo slug pueden dar 409 `conflicto_concurrente`.
+- Para reemplazar el `.tex` de un capítulo se vuelve a subir con el mismo slug.
+
+**`PATCH /admin/capitulos/{id}`** con `{"orden"?: 3, "titulo"?: "…"}`:
+- Cambia la numeración y/o el título en **cualquier etapa**: son solo presentación y no crean una versión nueva.
+- Hace falta al menos uno de los dos campos (si no, 400). Las reglas son las de la subida: `orden` es un entero de 0 a 100 000 y `titulo` tiene de 1 a 255 caracteres. Los demás campos (`slug`, …) se ignoran.
+- Orden de comprobación: rol, entrada (400) y capítulo (404).
+- Responde 200 `{"id": 3}`. Si el capítulo no existe, 404.
+- Queda en auditoría (`editar_capitulo`) con los valores anteriores y nuevos.
+
+**`DELETE /admin/capitulos/{id}`**:
+- Solo en **preparación**: en otra etapa responde 409 `etapa_no_permite` (la etapa se comprueba antes que el capítulo).
+- Solo si el capítulo **no tiene aportes**: ninguna fila en `copias_laboratorio`, `revisiones_copia`, `sugerencias` ni `comentarios`, y ninguna versión `final`. Si los tiene, 409 `operacion_no_permitida` y no cambia nada.
+- Borra en una transacción las versiones del capítulo y luego el capítulo, e invalida en APCu sus documentos base.
+- Responde 204 sin cuerpo. Si el capítulo no existe, 404.
+- Si la base rechaza el borrado (interbloqueo, espera agotada o una FK por un aporte recién creado), responde 409 `conflicto_concurrente` y no cambia nada.
+- Queda en auditoría (`borrar_capitulo`) con `slug`, `titulo`, `orden` y los ids de las versiones borradas.
 
 **`GET /admin/usuarios`** devuelve `[{"id", "nombre", "laboratorio", "correo", "roles", "activo"}]`, ordenado por laboratorio, nombre e id. El correo va descifrado.
 

@@ -169,6 +169,71 @@ final class AdminCtl
         return Respuesta::json(201, $r);
     }
 
+    /**
+     * PATCH /admin/capitulos/{id} con `{orden?, titulo?}`: numeración y título, en cualquier etapa (solo presentación).
+     * Orden de comprobación: rol, entrada (400), capítulo (404), como en PATCH /admin/usuarios/{id}.
+     */
+    public function editarCapitulo(Peticion $p, array $params): Respuesta
+    {
+        $admin = $this->sesion->exigirRol(Rol::ADMIN);
+        $id = (int) $params['id'];
+        $e = $p->json();
+        // Mismas reglas que en la subida (subirCapitulo).
+        $orden = array_key_exists('orden', $e) ? Entrada::entero($e, 'orden', 0, 100000) : null;
+        $titulo = array_key_exists('titulo', $e) ? Entrada::texto($e, 'titulo', 255) : null;
+        if ($orden === null && $titulo === null) {
+            throw new ErrorHttp(400, 'entrada_invalida', 'Indique «orden» o «titulo».', ['orden' => 'Falta al menos un campo.']);
+        }
+        // Lectura y escritura en una transacción con la fila bloqueada: un DELETE concurrente da 404, no un 200 vacío.
+        $antes = $this->capitulos->actualizar($id, $orden, $titulo);
+        if ($antes === null) {
+            throw new ErrorHttp(404, 'no_encontrado', 'Capítulo no encontrado.');
+        }
+        $detalle = [];
+        if ($orden !== null) {
+            $detalle['orden'] = ['antes' => $antes['orden'], 'despues' => $orden];
+        }
+        if ($titulo !== null) {
+            $detalle['titulo'] = ['antes' => $antes['titulo'], 'despues' => $titulo];
+        }
+        $this->auditoria->registrar($admin['id'], 'editar_capitulo', 'capitulo', $id, $detalle);
+        return Respuesta::json(200, ['id' => $id]);
+    }
+
+    /**
+     * DELETE /admin/capitulos/{id}: solo en preparación y solo si el capítulo no tiene aportes
+     * (copias, instantáneas, sugerencias, comentarios ni versión final). Orden: rol, etapa (409), 404, aportes (409).
+     */
+    public function borrarCapitulo(Peticion $p, array $params): Respuesta
+    {
+        $admin = $this->sesion->exigirRol(Rol::ADMIN);
+        if ($this->consulta->etapa() !== Etapa::PREPARACION) {
+            throw new ErrorHttp(409, 'etapa_no_permite', 'Solo se pueden borrar capítulos antes de la apertura de la consulta.');
+        }
+        $id = (int) $params['id'];
+        try {
+            $r = $this->capitulos->borrarSinAportes($id);
+        } catch (\PDOException $ex) {
+            // 40001: interbloqueo. 1205: espera de bloqueo agotada. 23000: la FK RESTRICT rechazó el borrado
+            // (un aporte se coló pese a la comprobación). En todos los casos la transacción se deshizo.
+            if (in_array((string) $ex->getCode(), ['40001', '23000'], true) || (int) ($ex->errorInfo[1] ?? 0) === 1205) {
+                throw new ErrorHttp(409, 'conflicto_concurrente', 'Otra operación sobre el capítulo está en curso. Reintente.');
+            }
+            throw $ex;
+        }
+        if ($r['estado'] === 'no_existe') {
+            throw new ErrorHttp(404, 'no_encontrado', 'Capítulo no encontrado.');
+        }
+        if ($r['estado'] === 'con_aportes') {
+            throw new ErrorHttp(409, 'operacion_no_permitida', 'No se puede borrar el capítulo: ya tiene aportes (copias, sugerencias o comentarios de laboratorios, o una versión final).');
+        }
+        $c = $r['capitulo'];
+        $this->auditoria->registrar($admin['id'], 'borrar_capitulo', 'capitulo', $id, [
+            'slug' => $c['slug'], 'titulo' => $c['titulo'], 'orden' => $c['orden'], 'versiones' => $r['versiones'],
+        ]);
+        return Respuesta::vacia();
+    }
+
     public function guardarConsulta(Peticion $p): Respuesta
     {
         $admin = $this->sesion->exigirRol(Rol::ADMIN);

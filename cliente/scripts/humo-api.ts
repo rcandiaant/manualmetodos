@@ -261,6 +261,27 @@ async function main(): Promise<void> {
   });
   comprobar(cap.id > 0 && cap.versionId > 0, `POST /admin/capitulos → capítulo ${cap.id}, versión base ${cap.versionId}`);
 
+  // Un capítulo de descarte: se renumera, se retitula y se borra (sin aportes, en preparación).
+  const descarte = await admin.api.post<CapituloCreado>('/admin/capitulos', {
+    slug: `${slug}-descarte`,
+    titulo: 'Descarte',
+    orden: 2,
+    texOriginal: tex,
+    docJson: docImportado,
+  });
+  const editado = await admin.api.patch<{ id: number }>(`/admin/capitulos/${descarte.id}`, { orden: 9, titulo: 'Descarte renombrado' });
+  const trasEditar = (await admin.api.get<CapituloLista[]>('/capitulos')).find((c) => c.id === descarte.id);
+  comprobar(
+    editado.id === descarte.id && trasEditar?.orden === 9 && trasEditar.titulo === 'Descarte renombrado',
+    'PATCH /admin/capitulos/{id} cambia orden y título',
+  );
+  await admin.api.del(`/admin/capitulos/${descarte.id}`);
+  const trasBorrar = await admin.api.get<CapituloLista[]>('/capitulos');
+  comprobar(
+    !trasBorrar.some((c) => c.id === descarte.id) && trasBorrar.some((c) => c.id === cap.id),
+    'DELETE /admin/capitulos/{id} borra el capítulo sin aportes (y deja el otro)',
+  );
+
   paso('3. Importa 3 laboratorios y un revisor');
   const filas = [
     ['Ana Humo', `lab1-${sello}@${dominio}`, 'Laboratorio Norte'],
@@ -296,6 +317,9 @@ async function main(): Promise<void> {
     'etapa_no_permite',
     'con la consulta abierta ya no se pueden subir capítulos',
   );
+  await esperarError(admin.api.del(`/admin/capitulos/${cap.id}`), 'etapa_no_permite', 'con la consulta abierta ya no se pueden borrar capítulos');
+  await admin.api.patch(`/admin/capitulos/${cap.id}`, { titulo: 'Capítulo de humo (sintético)' });
+  ok('con la consulta abierta el título se sigue pudiendo cambiar (PATCH /admin/capitulos/{id})');
 
   paso('5. Cada laboratorio entra, edita y guarda (sugerencias del motor real)');
   const labs = [nuevoActor('Laboratorio Norte'), nuevoActor('Laboratorio Centro'), nuevoActor('Laboratorio Sur')];

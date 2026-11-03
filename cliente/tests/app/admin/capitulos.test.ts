@@ -21,7 +21,8 @@ Primer párrafo con \textbf{negrita}.
 `;
 
 async function montar(etapa: Consulta['etapa'], ...extra: Response[]) {
-  const f = fetchSimulado(json(200, consulta(etapa)), ...extra);
+  // GET /consulta y GET /capitulos (lista vacía) al montar.
+  const f = fetchSimulado(json(200, consulta(etapa)), json(200, []), ...extra);
   const api = crearApi({ fetch: f.fetch, alSinSesion: () => {} });
   const raiz = document.createElement('div');
   const vista = vistaCapitulos(api);
@@ -54,18 +55,20 @@ describe('admin: capítulos', () => {
   });
 
   it('sube con texOriginal y docJson en preparacion', async () => {
-    const { raiz, vista, f } = await montar('preparacion', json(201, { id: 3, versionId: 7 }));
+    const { raiz, vista, f } = await montar('preparacion', json(201, { id: 3, versionId: 7 }), json(200, []));
     vista.cargar('cap-1.tex', TEX);
     (raiz.querySelector('input[name=orden]') as HTMLInputElement).value = '4';
     boton(raiz, 'Subir').click();
     await vista.listo;
-    const llamada = f.llamadas[1];
+    const llamada = f.llamadas[2];
     expect(llamada.url).toBe('/api/admin/capitulos');
     expect(llamada.init.method).toBe('POST');
     const cuerpo = JSON.parse(String(llamada.init.body));
     expect(cuerpo).toMatchObject({ slug: 'cap-1', orden: 4, texOriginal: TEX });
     expect(cuerpo.docJson.type).toBe('doc');
     expect(raiz.textContent).toContain('Capítulo subido');
+    // Tras subir, se recarga la lista de capítulos.
+    expect(f.llamadas[3].url).toBe('/api/capitulos');
   });
 
   it('subir fuera de preparacion explica el bloqueo', async () => {
@@ -75,7 +78,7 @@ describe('admin: capítulos', () => {
     expect(raiz.querySelector('.bloqueo')?.textContent).toContain('solo se pueden subir capítulos en la etapa de preparación');
     boton(raiz, 'Subir').click();
     await vista.listo;
-    expect(f.llamadas).toHaveLength(1); // solo el GET /consulta
+    expect(f.llamadas).toHaveLength(2); // solo GET /consulta y GET /capitulos
   });
 
   it('un 409 del servidor y los errores 400 por campo se muestran', async () => {
@@ -87,7 +90,7 @@ describe('admin: capítulos', () => {
     vista.cargar('cap-1.tex', TEX);
     boton(raiz, 'Subir').click();
     await vista.listo;
-    expect(raiz.querySelector('.error')?.textContent).toContain('etapa');
+    expect(raiz.querySelector('.error:not([hidden])')?.textContent).toContain('etapa');
     boton(raiz, 'Subir').click();
     await vista.listo;
     expect(raiz.querySelector('[data-campo=slug]')?.textContent).toContain('Formato inválido.');

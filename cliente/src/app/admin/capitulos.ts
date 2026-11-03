@@ -2,13 +2,17 @@
  * Administración de capítulos (`#/admin/capitulos`): importa un `.tex` en el navegador,
  * muestra una vista previa con avisos y bloques `especial`, y lo sube con
  * `POST /admin/capitulos` (solo en preparación; docs/api.md §4.6).
+ *
+ * También lista los capítulos subidos: el orden y el título se editan en cualquier etapa
+ * (`PATCH /admin/capitulos/{id}`) y un capítulo sin aportes se borra solo en preparación
+ * (`DELETE /admin/capitulos/{id}`), con una confirmación en la página.
  */
 import { boton, el } from '../../editor/ui';
 import { importarLatex } from '../../latex/importar';
 import type { DocJSON } from '../../tipos';
 import { ErrorApi, type Api } from '../api';
 import type { Vista } from '../router';
-import type { CapituloCreado, Consulta } from '../tipos-api';
+import type { CapituloCambio, CapituloCreado, CapituloLista, Consulta } from '../tipos-api';
 import { cabeceraAdmin, cajaError, mensajeError, mostrar } from './comun';
 
 /** Slug desde el nombre del archivo: minúsculas, sin tildes, con guiones (máx. 80). */
@@ -46,6 +50,24 @@ export function especialesDe(doc: DocJSON): string[] {
 
 const recorte = (s: string, max = 160): string => (s.length > max ? `${s.slice(0, max)}…` : s);
 
+const MAX_ORDEN = 100000;
+export const TITULO_BORRAR_BLOQUEADO = 'Solo se pueden borrar capítulos antes de abrir la consulta';
+
+/** Orden de la lista: por `orden` y, a igualdad, por `id` (como `GET /capitulos`). */
+const porOrden = (a: CapituloLista, b: CapituloLista): number => a.orden - b.orden || a.id - b.id;
+
+/**
+ * Lo escrito en una fila y aún no guardado: sobrevive a los redibujados de la lista.
+ * Guarda además los valores del servidor sobre los que se escribió: si una recarga trae otros
+ * (p. ej. el capítulo se volvió a subir), el borrador se descarta para no revertirlos al guardar.
+ */
+interface Borrador {
+  orden: string;
+  titulo: string;
+  baseOrden: number;
+  baseTitulo: string;
+}
+
 export interface VistaCapitulos extends Vista {
   /** Promesa de la última operación asíncrona (carga de la etapa, subida). */
   readonly listo: Promise<void>;
@@ -57,9 +79,14 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
   let vigente = true;
   let listo: Promise<void> = Promise.resolve();
   let etapa: Consulta['etapa'] | null = null;
+  let etapaFallida = false;
   let tex = '';
   let doc: DocJSON | null = null;
   let subiendo = false;
+  let capitulos: CapituloLista[] = [];
+  const borradores = new Map<number, Borrador>();
+  let confirmando: number | null = null;
+  let operando = false;
 
   const errores = cajaError();
   const exito = el('div', { class: 'exito', role: 'status', hidden: '' });
@@ -82,6 +109,203 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
     texOriginal: errorTex,
   };
   const btnSubir = boton('Subir', () => void subir(), 'primario');
+
+  const erroresLista = cajaError();
+  const estadoLista = el('div', { class: 'estado-lista', role: 'status', hidden: '' });
+  const cuerpoLista = el('tbody');
+
+  function borradorDe(c: CapituloLista): Borrador {
+    return borradores.get(c.id) ?? { orden: String(c.orden), titulo: c.titulo, baseOrden: c.orden, baseTitulo: c.titulo };
+  }
+
+  function filaCapitulo(c: CapituloLista): HTMLTableRowElement {
+    const b = borradorDe(c);
+    const orden = el('input', {
+      type: 'number',
+      name: `orden-${c.id}`,
+      min: '0',
+      max: String(MAX_ORDEN),
+      step: '1',
+      class: 'orden-capitulo',
+      'aria-label': `Orden de «${c.titulo}»`,
+    });
+    const titulo = el('input', {
+      type: 'text',
+      name: `titulo-${c.id}`,
+      maxlength: '255',
+      class: 'titulo-capitulo',
+      'aria-label': `Título de «${c.titulo}»`,
+    });
+    orden.value = b.orden;
+    titulo.value = b.titulo;
+    // Solo hay borrador si lo escrito difiere de lo guardado.
+    const recordar = () => {
+      if (orden.value === String(c.orden) && titulo.value === c.titulo) borradores.delete(c.id);
+      else borradores.set(c.id, { orden: orden.value, titulo: titulo.value, baseOrden: c.orden, baseTitulo: c.titulo });
+    };
+    for (const entrada of [orden, titulo]) {
+      entrada.addEventListener('input', recordar);
+      entrada.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        recordar();
+        void guardar(c);
+      });
+    }
+    const btnGuardar = boton('Guardar', () => {
+      recordar();
+      void guardar(c);
+    });
+    const preparacion = etapa === 'preparacion';
+    const btnBorrar = boton(
+      'Borrar',
+      () => {
+        recordar();
+        confirmando = c.id;
+        dibujarLista();
+        cuerpoLista.querySelector<HTMLButtonElement>('.confirmar .cancelar')?.focus();
+      },
+      'borrar-capitulo',
+      preparacion
+        ? undefined
+        : etapa !== null
+          ? TITULO_BORRAR_BLOQUEADO
+          : etapaFallida
+            ? 'No se pudo saber la etapa de la consulta; recargue la página'
+            : 'Cargando la etapa de la consulta…',
+    );
+    btnBorrar.disabled = !preparacion;
+    const acciones = el('div', { class: 'acciones' }, btnGuardar, btnBorrar);
+    const fila = el(
+      'tr',
+      { 'data-id': String(c.id) },
+      el('td', {}, orden),
+      el('td', {}, titulo),
+      el('td', {}, el('code', {}, c.slug)),
+      el('td', {}, acciones),
+    );
+    if (confirmando === c.id) {
+      fila.lastElementChild?.append(
+        el(
+          'div',
+          { class: 'confirmar' },
+          el('p', {}, `¿Borrar el capítulo "${c.titulo}"? Esta acción no se puede deshacer.`),
+          el(
+            'div',
+            { class: 'acciones' },
+            boton('Borrar definitivamente', () => void borrar(c), 'borrar-definitivo'),
+            boton(
+              'Cancelar',
+              () => {
+                confirmando = null;
+                dibujarLista();
+              },
+              'cancelar',
+            ),
+          ),
+        ),
+      );
+    }
+    return fila;
+  }
+
+  function dibujarLista(): void {
+    // Las filas se recrean: si el foco estaba en un campo de la lista, se devuelve al mismo campo.
+    const activo = document.activeElement;
+    const conFoco = activo instanceof HTMLInputElement && cuerpoLista.contains(activo) ? activo.name : null;
+    cuerpoLista.replaceChildren(...capitulos.map(filaCapitulo));
+    if (capitulos.length === 0) {
+      cuerpoLista.append(el('tr', {}, el('td', { colspan: '4', class: 'vacio' }, 'Aún no hay capítulos subidos.')));
+    }
+    if (conFoco) cuerpoLista.querySelector<HTMLInputElement>(`input[name="${conFoco}"]`)?.focus();
+  }
+
+  async function cargarLista(): Promise<void> {
+    const lista = await api.get<CapituloLista[]>('/capitulos');
+    if (!vigente) return;
+    capitulos = [...lista].sort(porOrden);
+    for (const [id, b] of [...borradores]) {
+      const c = capitulos.find((x) => x.id === id);
+      if (!c || c.orden !== b.baseOrden || c.titulo !== b.baseTitulo) borradores.delete(id);
+    }
+    dibujarLista();
+  }
+
+  async function hacerGuardado(c: CapituloLista): Promise<void> {
+    if (operando) return;
+    mostrar(erroresLista, null);
+    estadoLista.hidden = true;
+    const b = borradorDe(c);
+    const titulo = b.titulo.trim();
+    const orden = Number(b.orden);
+    if (b.orden.trim() === '' || !Number.isInteger(orden) || orden < 0 || orden > MAX_ORDEN) {
+      mostrar(erroresLista, `«${c.titulo}»: el orden es un entero de 0 a 100 000.`);
+      return;
+    }
+    if (titulo.length < 1 || titulo.length > 255) {
+      mostrar(erroresLista, `«${c.titulo}»: el título debe tener de 1 a 255 caracteres.`);
+      return;
+    }
+    const cambio: CapituloCambio = {};
+    if (orden !== c.orden) cambio.orden = orden;
+    if (titulo !== c.titulo) cambio.titulo = titulo;
+    if (cambio.orden === undefined && cambio.titulo === undefined) {
+      borradores.delete(c.id);
+      dibujarLista();
+      mostrar(estadoLista, 'Sin cambios.');
+      return;
+    }
+    operando = true;
+    try {
+      await api.patch(`/admin/capitulos/${c.id}`, cambio);
+      if (!vigente) return;
+      if (cambio.orden !== undefined) c.orden = cambio.orden;
+      if (cambio.titulo !== undefined) c.titulo = cambio.titulo;
+      borradores.delete(c.id);
+      capitulos.sort(porOrden);
+      dibujarLista();
+      mostrar(estadoLista, 'Guardado.');
+    } catch (e) {
+      // No se redibuja: lo escrito sigue en los campos (y en el borrador).
+      if (vigente) mostrar(erroresLista, `No se pudo guardar «${c.titulo}»: ${mensajeError(e)}`);
+    } finally {
+      operando = false;
+    }
+  }
+
+  function guardar(c: CapituloLista): Promise<void> {
+    listo = hacerGuardado(c);
+    return listo;
+  }
+
+  async function hacerBorrado(c: CapituloLista): Promise<void> {
+    if (operando || etapa !== 'preparacion') return;
+    mostrar(erroresLista, null);
+    estadoLista.hidden = true;
+    operando = true;
+    try {
+      await api.del(`/admin/capitulos/${c.id}`);
+      if (!vigente) return;
+      capitulos = capitulos.filter((x) => x.id !== c.id);
+      borradores.delete(c.id);
+      confirmando = null;
+      dibujarLista();
+      mostrar(estadoLista, `Capítulo "${c.titulo}" borrado.`);
+    } catch (e) {
+      if (!vigente) return;
+      confirmando = null;
+      dibujarLista();
+      // Un 409 (aportes o etapa) trae del servidor la explicación concreta.
+      mostrar(erroresLista, e instanceof ErrorApi && e.estado === 409 ? e.message : mensajeError(e));
+    } finally {
+      operando = false;
+    }
+  }
+
+  function borrar(c: CapituloLista): Promise<void> {
+    listo = hacerBorrado(c);
+    return listo;
+  }
 
   function actualizarBloqueo(): void {
     const abierto = etapa === 'preparacion';
@@ -180,6 +404,9 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
       if (!vigente) return;
       exito.textContent = `Capítulo subido (id ${r.id}, versión base ${r.versionId}).`;
       exito.hidden = false;
+      await cargarLista().catch((e: unknown) => {
+        if (vigente) mostrar(erroresLista, mensajeError(e));
+      });
     } catch (e) {
       if (!vigente) return;
       if (e instanceof ErrorApi && e.estado === 400 && e.campos) {
@@ -242,7 +469,30 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
           'main',
           { class: 'app admin' },
           cabeceraAdmin('Capítulos'),
-          el('p', { class: 'ayuda' }, 'Elija el archivo .tex de un capítulo. Se importa en este navegador y se revisa antes de subirlo.'),
+          el(
+            'section',
+            { class: 'lista-capitulos' },
+            el('h2', {}, 'Capítulos subidos'),
+            el(
+              'p',
+              { class: 'ayuda' },
+              'El orden y el título se pueden cambiar en cualquier etapa (Guardar o Enter). Borrar solo es posible antes de abrir la consulta y si el capítulo no tiene aportes.',
+            ),
+            erroresLista,
+            estadoLista,
+            el(
+              'table',
+              { class: 'tabla' },
+              el('thead', {}, el('tr', {}, ...['Orden', 'Título', 'Slug', 'Acciones'].map((t) => el('th', {}, t)))),
+              cuerpoLista,
+            ),
+          ),
+          el('h2', {}, 'Subir un capítulo'),
+          el(
+            'p',
+            { class: 'ayuda' },
+            'Elija el archivo .tex de un capítulo. Se importa en este navegador y se revisa antes de subirlo. Para reemplazar el .tex de un capítulo, súbalo de nuevo con el mismo slug.',
+          ),
           el('label', { for: 'archivo-tex' }, 'Archivo .tex'),
           archivo,
           errores,
@@ -252,21 +502,32 @@ export function vistaCapitulos(api: Api): VistaCapitulos {
           formulario,
         ),
       );
-      listo = api.get<Consulta>('/consulta').then(
+      const cargaEtapa = api.get<Consulta>('/consulta').then(
         (c) => {
           if (!vigente) return;
           etapa = c.etapa;
           actualizarBloqueo();
+          dibujarLista(); // el botón Borrar depende de la etapa
         },
         (e: unknown) => {
-          if (vigente) mostrar(errores, mensajeError(e));
+          if (!vigente) return;
+          etapaFallida = true;
+          mostrar(errores, mensajeError(e));
+          dibujarLista();
         },
       );
+      const cargaLista = cargarLista().catch((e: unknown) => {
+        if (vigente) mostrar(erroresLista, mensajeError(e));
+      });
+      listo = Promise.all([cargaEtapa, cargaLista]).then(() => undefined);
     },
     desmontar() {
       vigente = false;
       doc = null;
       tex = '';
+      capitulos = [];
+      borradores.clear();
+      cuerpoLista.replaceChildren();
     },
   };
 }

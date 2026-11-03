@@ -103,6 +103,8 @@ final class Aplicacion
         $this->ruta('GET', '/api/capitulos/{id}/final', fn (Peticion $p, array $a) => $this->revisionCtl()->verFinal($p, $a));
 
         $this->ruta('POST', '/api/admin/capitulos', fn (Peticion $p) => $this->adminCtl()->subirCapitulo($p));
+        $this->ruta('PATCH', '/api/admin/capitulos/{id}', fn (Peticion $p, array $a) => $this->adminCtl()->editarCapitulo($p, $a));
+        $this->ruta('DELETE', '/api/admin/capitulos/{id}', fn (Peticion $p, array $a) => $this->adminCtl()->borrarCapitulo($p, $a));
         $this->ruta('GET', '/api/admin/usuarios', fn (Peticion $p) => $this->adminCtl()->listarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/importar', fn (Peticion $p) => $this->adminCtl()->importarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/{id}/clave', fn (Peticion $p, array $a) => $this->adminCtl()->regenerarClave($p, $a));

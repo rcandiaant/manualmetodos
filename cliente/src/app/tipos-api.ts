@@ -204,6 +204,12 @@ export interface CapituloCreado {
   versionId: number;
 }
 
+/** Cuerpo de `PATCH /admin/capitulos/{id}`: solo los campos que cambian. */
+export interface CapituloCambio {
+  orden?: number;
+  titulo?: string;
+}
+
 export interface UsuarioAdmin {
   id: number;
   nombre: string;
