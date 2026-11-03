@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { vistaUsuarios } from '../../../src/app/admin/usuarios';
+import { contarFilas, vistaUsuarios } from '../../../src/app/admin/usuarios';
 import { crearApi } from '../../../src/app/api';
+import { separadorCsv } from '../../../src/app/csv';
 import type { UsuarioAdmin } from '../../../src/app/tipos-api';
 import { error, fetchSimulado, json } from '../ayudas';
 
@@ -140,6 +141,62 @@ describe('admin: usuarios', () => {
     await vista.importar(`nombre,correo,laboratorio\n${filas}`);
     expect(f.llamadas).toHaveLength(1);
     expect(raiz.querySelector('.errores-csv')?.textContent).toContain('100');
+  });
+
+  it('la ayuda dice que el encabezado es opcional y que se puede pegar desde Excel', async () => {
+    const { raiz } = await montar();
+    const ayuda = raiz.querySelector('.ayuda')?.textContent ?? '';
+    expect(ayuda).toContain('encabezado es opcional');
+    expect(ayuda).toContain('Excel');
+    expect(ayuda).toContain('nombre, correo, laboratorio');
+    expect(ayuda).toMatch(/;.*,.*tabulador/);
+    expect(ayuda).toContain('100');
+    const placeholder = raiz.querySelector('textarea')?.getAttribute('placeholder') ?? '';
+    expect(placeholder).toContain('opcional');
+    expect(placeholder).toContain('Excel');
+  });
+
+  it('contarFilas no cuenta el encabezado, venga como venga', () => {
+    expect(contarFilas('nombre,correo,laboratorio\nAna,a@lab.cl,L\nLuis,l@lab.cl,L\n')).toBe(2);
+    expect(contarFilas('Ana,a@lab.cl,L\nLuis,l@lab.cl,L')).toBe(2);
+    expect(contarFilas('Ana;a@lab.cl;L\n\n  \nLuis;l@lab.cl;L\n')).toBe(2);
+    expect(contarFilas(' Nombre ; Correo ; Laboratorio \r\nAna;a@lab.cl;L\r\n')).toBe(1);
+    expect(contarFilas('﻿​Nombre\tCorreo \tLaboratorio\nAna\ta@lab.cl\tL\n')).toBe(1);
+    expect(contarFilas('\n\nnombre;correo;laboratorio\n')).toBe(0);
+    expect(contarFilas('')).toBe(0);
+    // Filas vacías de Excel o de planilla (solo separadores, espacios o invisibles) no cuentan.
+    expect(contarFilas(';;\n\t\t\nAna\ta@lab.cl\tL\n\t\t\n \t​\t \n,,\n')).toBe(1);
+    // El separador es el que da 3 campos: aquí «,», aunque haya «;» entre comillas; no es encabezado.
+    expect(contarFilas('"Soto; Luis",l@lab.cl,L\nAna,a@lab.cl,L')).toBe(2);
+    expect(contarFilas('"nombre";"correo";"laboratorio"\nAna;a@lab.cl;L')).toBe(1);
+  });
+
+  it('separadorCsv elige el primer candidato que da exactamente 3 campos', () => {
+    expect(separadorCsv('"Soto; Luis",l@lab.cl,L')).toBe(',');
+    expect(separadorCsv('Soto, Luis\tl@lab.cl\tLab; Sur')).toBe('\t');
+    expect(separadorCsv('Ana;a@lab.cl;Lab, Norte')).toBe(';');
+    // Ninguno da 3: heurística (tabulador, si no «;», si no «,»).
+    expect(separadorCsv('Ana;a@lab.cl')).toBe(';');
+    expect(separadorCsv('Ana,a@lab.cl')).toBe(',');
+    expect(separadorCsv('Ana\ta@lab.cl')).toBe('\t');
+  });
+
+  it('el tope de 100 no cuenta el encabezado: 100 filas sin encabezado se envían', async () => {
+    const { f, vista } = await montar(json(201, CLAVES), json(200, USUARIOS));
+    const filas = Array.from({ length: 100 }, (_, i) => `N${i};c${i}@lab.cl;Lab`).join('\n');
+    await vista.importar(filas);
+    expect(f.llamadas[1].url).toBe('/api/admin/usuarios/importar');
+    const otra = await montar();
+    await otra.vista.importar(`${filas}\nN100;c100@lab.cl;Lab`);
+    expect(otra.f.llamadas).toHaveLength(1);
+  });
+
+  it('importar envía el texto pegado tal cual, sin limpiarlo en el navegador', async () => {
+    const { f, vista } = await montar(json(201, CLAVES), json(200, USUARIOS));
+    const crudo = '﻿ Nombre\tCorreo\tLaboratorio \r\n Ana 2\t ANA2@Lab.cl​\t“Lab Norte”\r\n';
+    await vista.importar(crudo);
+    expect(f.llamadas[1].url).toBe('/api/admin/usuarios/importar');
+    expect(JSON.parse(String(f.llamadas[1].init.body))).toEqual({ csv: crudo });
   });
 
   it('regenerar clave avisa que cierra sesiones, pide confirmar y muestra la clave una vez', async () => {

@@ -48,15 +48,33 @@ final class Consulta
         ];
     }
 
-    public function guardar(\DateTimeImmutable $apertura, \DateTimeImmutable $cierre, bool $motivoObligatorio): void
+    /** Ambas fechas null: la consulta vuelve a preparación (sin fechas). */
+    public function guardar(?\DateTimeImmutable $apertura, ?\DateTimeImmutable $cierre, bool $motivoObligatorio): void
     {
         $this->bd->prepare('UPDATE consulta SET apertura = ?, cierre = ?, motivo_obligatorio = ? WHERE id = 1')
-            ->execute([self::sql($apertura), self::sql($cierre), $motivoObligatorio ? 1 : 0]);
+            ->execute([$apertura === null ? null : self::sql($apertura), $cierre === null ? null : self::sql($cierre), $motivoObligatorio ? 1 : 0]);
     }
 
-    public function guardarMotivo(bool $motivoObligatorio): void
+    /**
+     * dto() más los datos que solo ve el admin (docs/api.md §4.1): sugerencias ya decididas por el revisor,
+     * total de aportes (sugerencias + comentarios), versiones finales guardadas, si «Reiniciar datos de prueba» está
+     * habilitado y la hora del servidor (`ahora`), para que las acciones rápidas no dependan del reloj del navegador.
+     * @return array{apertura:?string,cierre:?string,etapa:string,motivoObligatorio:bool,decisionesTomadas:int,aportes:int,versionesFinal:int,reinicioPermitido:bool,ahora:string}
+     */
+    public function dtoAdmin(bool $reinicioPermitido): array
     {
-        $this->bd->prepare('UPDATE consulta SET motivo_obligatorio = ? WHERE id = 1')->execute([$motivoObligatorio ? 1 : 0]);
+        $f = $this->bd->query(
+            "SELECT (SELECT COUNT(*) FROM sugerencias WHERE estado <> 'pendiente') AS decisiones,"
+            . ' (SELECT COUNT(*) FROM sugerencias) + (SELECT COUNT(*) FROM comentarios) AS aportes,'
+            . " (SELECT COUNT(*) FROM versiones_capitulo WHERE tipo = 'final') AS finales"
+        )->fetch();
+        return $this->dto() + [
+            'decisionesTomadas' => (int) $f['decisiones'],
+            'aportes' => (int) $f['aportes'],
+            'versionesFinal' => (int) $f['finales'],
+            'reinicioPermitido' => $reinicioPermitido,
+            'ahora' => self::iso($this->reloj->ahora()),
+        ];
     }
 
     public static function iso(?\DateTimeImmutable $f): ?string

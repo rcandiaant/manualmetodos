@@ -14,6 +14,8 @@ final class Config
         public readonly string $claveIndice,
         public readonly bool $cookieSegura,
         public readonly string $zonaHoraria,
+        /** REINICIO_PRUEBAS=1: habilita «Reiniciar datos de prueba» (POST /api/admin/reiniciar). Solo antes de la consulta real. */
+        public readonly bool $reinicioPruebas = false,
     ) {
     }
 
@@ -38,7 +40,7 @@ final class Config
                 $valores[trim($clave)] = $valor;
             }
         }
-        foreach (['BD_DSN', 'BD_HOST', 'BD_NOMBRE', 'BD_USUARIO', 'BD_CLAVE', 'CLAVE_CIFRADO', 'CLAVE_INDICE', 'COOKIE_SEGURA', 'ZONA_HORARIA'] as $k) {
+        foreach (['BD_DSN', 'BD_HOST', 'BD_NOMBRE', 'BD_USUARIO', 'BD_CLAVE', 'CLAVE_CIFRADO', 'CLAVE_INDICE', 'COOKIE_SEGURA', 'ZONA_HORARIA', 'REINICIO_PRUEBAS'] as $k) {
             if (!isset($valores[$k]) && ($e = getenv($k)) !== false) {
                 $valores[$k] = $e;
             }
@@ -66,6 +68,8 @@ final class Config
             $indice,
             ($v['COOKIE_SEGURA'] ?? '0') === '1',
             ($v['ZONA_HORARIA'] ?? '') !== '' ? $v['ZONA_HORARIA'] : 'America/Santiago',
+            // Cierra por defecto: solo el valor «1» (sin espacios alrededor; el .env ya quita las comillas) lo habilita.
+            trim($v['REINICIO_PRUEBAS'] ?? '0') === '1',
         );
     }
 

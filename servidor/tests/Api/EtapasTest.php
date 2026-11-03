@@ -26,8 +26,6 @@ final class EtapasTest extends TestCase
     public static function escrituras(): array
     {
         return [
-            'POST /admin/capitulos' => ['preparacion', 'subir'],
-            'PUT /admin/consulta (fechas)' => ['preparacion', 'fechas'],
             'PUT /capitulos/{id}/copia' => ['consulta', 'copia'],
             'PATCH /capitulos/{id}/sugerencias/{uid}' => ['consulta', 'motivo'],
             'POST /capitulos/{id}/comentarios' => ['consulta', 'comentar'],
@@ -51,7 +49,7 @@ final class EtapasTest extends TestCase
             ]),
             'copia' => $this->lab->put("/capitulos/{$this->cap}/copia", ['versionId' => $this->ver, 'docJson' => $this->docCopia(), 'sugerencias' => []]),
             'motivo' => $this->lab->patch("/capitulos/{$this->cap}/sugerencias/$uid", ['motivo' => 'porque sí']),
-            'comentar' => $this->lab->post("/capitulos/{$this->cap}/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'nuevo']),
+            'comentar' => $this->lab->post("/capitulos/{$this->cap}/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'nuevo', 'versionId' => $this->ver]),
             'editar' => $this->lab->patch("/comentarios/{$this->comIds[0]}", ['texto' => 'editado']),
             'borrar' => $this->lab->delete("/comentarios/{$this->comIds[0]}"),
             'resolver' => $this->revisor->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'aceptada']),
@@ -101,7 +99,26 @@ final class EtapasTest extends TestCase
                 $celdas++;
             }
         }
-        self::assertSame(30, $celdas);
+        self::assertSame(24, $celdas);
+    }
+
+    /**
+     * Las escrituras del admin no dependen de la etapa: subir un capítulo nuevo y cambiar las fechas
+     * valen en las tres (reemplazar el texto de un capítulo con aportes da 409 por otra razón, AdminCapitulosTest).
+     */
+    public function test_escrituras_del_admin_valen_en_cualquier_etapa(): void
+    {
+        foreach (['subir', 'fechas'] as $clave) {
+            foreach (self::ETAPAS as $etapa) {
+                $this->montar();
+                $this->aEtapa($etapa);
+                $antes = $this->huella();
+                $r = $this->ejecutar($clave);
+                self::assertGreaterThanOrEqual(200, $r->estado, "$clave en $etapa: " . $r->cuerpo());
+                self::assertLessThan(300, $r->estado, "$clave en $etapa: " . $r->cuerpo());
+                self::assertNotSame($antes, $this->huella(), "$clave en $etapa debía escribir");
+            }
+        }
     }
 
     public function test_las_etapas_de_escritura_no_se_solapan(): void

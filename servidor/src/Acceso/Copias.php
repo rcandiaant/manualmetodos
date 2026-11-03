@@ -37,7 +37,8 @@ final class Copias
     }
 
     /**
-     * En una transacción: upsert de la copia (que bloquea la fila y serializa guardados simultáneos
+     * En una transacción: comprobación de la versión base vigente con el capítulo bloqueado en modo compartido
+     * (Capitulos::exigirVersionVigente, lanza VersionObsoleta), upsert de la copia (que bloquea la fila y serializa guardados simultáneos
      * del mismo laboratorio y capítulo), reemplazo del conjunto de sugerencias e instantánea si toca.
      * Cualquier fallo deshace todo.
      *
@@ -49,6 +50,7 @@ final class Copias
         $fecha = $ahora->format('Y-m-d H:i:s');
         $this->bd->beginTransaction();
         try {
+            Capitulos::exigirVersionVigente($this->bd, $capituloId, $versionBaseId);
             $this->bd->prepare(
                 'INSERT INTO copias_laboratorio (usuario_id, capitulo_id, version_base_id, doc_json, actualizado) VALUES (?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE version_base_id = ?, doc_json = ?, actualizado = ?'

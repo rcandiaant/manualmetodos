@@ -8,12 +8,10 @@ use Manual\Acceso\Auditoria;
 use Manual\Acceso\Capitulos;
 use Manual\Acceso\Consulta;
 use Manual\Acceso\Usuarios;
-use Manual\Dominio\Etapa;
 use Manual\Dominio\Rol;
 use Manual\Http\ErrorHttp;
 use Manual\Http\Peticion;
 use Manual\Http\Respuesta;
-use Manual\Reloj;
 use Manual\Seguridad\Claves;
 use Manual\Seguridad\Sesion;
 use Manual\Validacion\Entrada;
@@ -31,7 +29,7 @@ final class AdminCtl
         private readonly Capitulos $capitulos,
         private readonly Consulta $consulta,
         private readonly Auditoria $auditoria,
-        private readonly Reloj $reloj,
+        private readonly bool $reinicioPermitido = false,
     ) {
     }
 
@@ -131,10 +129,9 @@ final class AdminCtl
 
     public function subirCapitulo(Peticion $p): Respuesta
     {
+        // Un capítulo nuevo se sube en cualquier etapa. Reemplazar el texto de uno existente (mismo slug)
+        // también, salvo que ya tenga aportes: entonces 409 operacion_no_permitida (lo decide subirBase).
         $admin = $this->sesion->exigirRol(Rol::ADMIN);
-        if ($this->consulta->etapa() !== Etapa::PREPARACION) {
-            throw new ErrorHttp(409, 'etapa_no_permite', 'Solo se pueden subir capítulos antes de la apertura de la consulta.');
-        }
         $e = $p->json();
         $slug = Entrada::texto($e, 'slug', 80);
         if (preg_match('/^[a-z0-9-]{1,80}$/D', $slug) !== 1) {
@@ -157,68 +154,175 @@ final class AdminCtl
         try {
             $r = $this->capitulos->subirBase($slug, $titulo, $orden, $tex, $docJson, $admin['id']);
         } catch (\PDOException $ex) {
-            // Subida simultánea del mismo slug: clave duplicada (23000) o interbloqueo (40001).
-            if (in_array((string) $ex->getCode(), ['23000', '40001'], true)) {
+            // Subida simultánea del mismo slug: clave duplicada (23000) o interbloqueo (40001). 1205: espera de
+            // bloqueo agotada (p. ej. un guardado de laboratorio en curso sobre el mismo capítulo).
+            if (in_array((string) $ex->getCode(), ['23000', '40001'], true) || (int) ($ex->errorInfo[1] ?? 0) === 1205) {
                 throw new ErrorHttp(409, 'conflicto_concurrente', 'Otra subida del mismo capítulo está en curso. Reintente.');
             }
             throw $ex;
         }
+        if ($r['estado'] === 'con_aportes') {
+            $n = $r['laboratorios'];
+            throw new ErrorHttp(409, 'operacion_no_permitida', match (true) {
+                $n === 0 => 'El capítulo ya tiene una versión final; no se puede reemplazar el texto.',
+                $n === 1 => '1 laboratorio ya trabajó en este capítulo; no se puede reemplazar el texto.',
+                default => "$n laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto.",
+            });
+        }
         $this->auditoria->registrar($admin['id'], 'subir_capitulo', 'capitulo', $r['id'], [
             'slug' => $slug, 'versionId' => $r['versionId'], 'orden' => $orden, 'bytesTex' => strlen($tex), 'bytesDoc' => strlen($docJson),
         ]);
-        return Respuesta::json(201, $r);
+        return Respuesta::json(201, ['id' => $r['id'], 'versionId' => $r['versionId']]);
     }
 
+    /**
+     * PATCH /admin/capitulos/{id} con `{orden?, titulo?}`: numeración y título, en cualquier etapa (solo presentación).
+     * Orden de comprobación: rol, entrada (400), capítulo (404), como en PATCH /admin/usuarios/{id}.
+     */
+    public function editarCapitulo(Peticion $p, array $params): Respuesta
+    {
+        $admin = $this->sesion->exigirRol(Rol::ADMIN);
+        $id = (int) $params['id'];
+        $e = $p->json();
+        // Mismas reglas que en la subida (subirCapitulo).
+        $orden = array_key_exists('orden', $e) ? Entrada::entero($e, 'orden', 0, 100000) : null;
+        $titulo = array_key_exists('titulo', $e) ? Entrada::texto($e, 'titulo', 255) : null;
+        if ($orden === null && $titulo === null) {
+            throw new ErrorHttp(400, 'entrada_invalida', 'Indique «orden» o «titulo».', ['orden' => 'Falta al menos un campo.']);
+        }
+        // Lectura y escritura en una transacción con la fila bloqueada: un DELETE concurrente da 404, no un 200 vacío.
+        $antes = $this->capitulos->actualizar($id, $orden, $titulo);
+        if ($antes === null) {
+            throw new ErrorHttp(404, 'no_encontrado', 'Capítulo no encontrado.');
+        }
+        $detalle = [];
+        if ($orden !== null) {
+            $detalle['orden'] = ['antes' => $antes['orden'], 'despues' => $orden];
+        }
+        if ($titulo !== null) {
+            $detalle['titulo'] = ['antes' => $antes['titulo'], 'despues' => $titulo];
+        }
+        $this->auditoria->registrar($admin['id'], 'editar_capitulo', 'capitulo', $id, $detalle);
+        return Respuesta::json(200, ['id' => $id]);
+    }
+
+    /**
+     * DELETE /admin/capitulos/{id}: en cualquier etapa, solo si el capítulo no tiene aportes
+     * (copias, instantáneas, sugerencias, comentarios ni versión final). Orden: rol, 404, aportes (409).
+     */
+    public function borrarCapitulo(Peticion $p, array $params): Respuesta
+    {
+        $admin = $this->sesion->exigirRol(Rol::ADMIN);
+        $id = (int) $params['id'];
+        try {
+            $r = $this->capitulos->borrarSinAportes($id);
+        } catch (\PDOException $ex) {
+            // 40001: interbloqueo. 1205: espera de bloqueo agotada. 23000: la FK RESTRICT rechazó el borrado
+            // (un aporte se coló pese a la comprobación). En todos los casos la transacción se deshizo.
+            if (in_array((string) $ex->getCode(), ['40001', '23000'], true) || (int) ($ex->errorInfo[1] ?? 0) === 1205) {
+                throw new ErrorHttp(409, 'conflicto_concurrente', 'Otra operación sobre el capítulo está en curso. Reintente.');
+            }
+            throw $ex;
+        }
+        if ($r['estado'] === 'no_existe') {
+            throw new ErrorHttp(404, 'no_encontrado', 'Capítulo no encontrado.');
+        }
+        if ($r['estado'] === 'con_aportes') {
+            throw new ErrorHttp(409, 'operacion_no_permitida', 'No se puede borrar el capítulo: ya tiene aportes (copias, sugerencias o comentarios de laboratorios, o una versión final).');
+        }
+        $c = $r['capitulo'];
+        $this->auditoria->registrar($admin['id'], 'borrar_capitulo', 'capitulo', $id, [
+            'slug' => $c['slug'], 'titulo' => $c['titulo'], 'orden' => $c['orden'], 'versiones' => $r['versiones'],
+        ]);
+        return Respuesta::vacia();
+    }
+
+    /**
+     * PUT /admin/consulta con `{apertura, cierre, motivoObligatorio}`: el admin fija las fechas libremente
+     * en cualquier etapa (docs/api.md §4.6). Ambas null: vuelve a preparación. Ambas fechas: cierre > apertura;
+     * pueden estar en el pasado («Cerrar ahora» es cierre = ahora). Una sola: 400.
+     * Cada cambio queda en auditoría con los valores anteriores y los nuevos.
+     */
     public function guardarConsulta(Peticion $p): Respuesta
     {
         $admin = $this->sesion->exigirRol(Rol::ADMIN);
         $e = $p->json();
-        $apertura = Entrada::fechaIso($e, 'apertura');
-        $cierre = Entrada::fechaIso($e, 'cierre');
+        foreach (['apertura', 'cierre'] as $campo) {
+            if (!array_key_exists($campo, $e)) {
+                throw Entrada::invalido($campo, 'es obligatorio (null para quitar las fechas)');
+            }
+        }
+        $apertura = null;
+        $cierre = null;
+        if ($e['apertura'] !== null || $e['cierre'] !== null) {
+            if ($e['apertura'] === null) {
+                throw Entrada::invalido('apertura', 'falta: indique ambas fechas, o ninguna para volver a preparación');
+            }
+            if ($e['cierre'] === null) {
+                throw Entrada::invalido('cierre', 'falta: indique ambas fechas, o ninguna para volver a preparación');
+            }
+            $apertura = Entrada::fechaIso($e, 'apertura');
+            $cierre = Entrada::fechaIso($e, 'cierre');
+            // La base guarda segundos: se descartan las fracciones antes de comparar y guardar.
+            $apertura = $apertura->setTimestamp($apertura->getTimestamp());
+            $cierre = $cierre->setTimestamp($cierre->getTimestamp());
+            if ($cierre <= $apertura) {
+                throw Entrada::invalido('cierre', 'debe ser posterior a la apertura');
+            }
+        }
         if (!is_bool($e['motivoObligatorio'] ?? null)) {
             throw Entrada::invalido('motivoObligatorio', 'debe ser verdadero o falso');
         }
-        $motivo = $e['motivoObligatorio'];
-        // La base guarda segundos: se descartan las fracciones antes de comparar y guardar.
-        $apertura = $apertura->setTimestamp($apertura->getTimestamp());
-        $cierre = $cierre->setTimestamp($cierre->getTimestamp());
-        if ($cierre <= $apertura) {
-            throw Entrada::invalido('cierre', 'debe ser posterior a la apertura');
-        }
 
-        $actual = $this->consulta->dto();
-        $mismas = $actual['apertura'] === Consulta::iso($apertura) && $actual['cierre'] === Consulta::iso($cierre);
-        if ($actual['etapa'] === Etapa::PREPARACION) {
-            // Un error de tipeo en el pasado abriría o cerraría la consulta al instante y bloquearía las fechas.
-            // «Abrir ahora» es válido: apertura >= ahora - 5 min.
-            $ahora = $this->reloj->ahora();
-            if ($apertura < $ahora->modify('-5 minutes')) {
-                throw Entrada::invalido('apertura', 'no puede ser anterior a hace 5 minutos (para abrir ahora use la hora actual)');
-            }
-            if ($cierre <= $ahora) {
-                throw Entrada::invalido('cierre', 'debe ser posterior a la hora actual');
-            }
-            $this->consulta->guardar($apertura, $cierre, $motivo);
-        } elseif ($mismas) {
-            $this->consulta->guardarMotivo($motivo);
-        } elseif ($actual['etapa'] === Etapa::CONSULTA && $actual['apertura'] === Consulta::iso($apertura)
-            && $actual['cierre'] !== null && Consulta::iso($cierre) > $actual['cierre'] && $cierre > $this->reloj->ahora()) {
-            // «Ampliamos una semana»: durante la consulta solo se puede atrasar el cierre. No altera ninguna
-            // etapa ya vivida; acortarlo o mover la apertura sí lo haría (409, abajo).
-            // Las fechas ISO en UTC con «Z» y el mismo formato se comparan bien como texto.
-            $this->consulta->guardar($apertura, $cierre, $motivo);
-        } else {
-            throw new ErrorHttp(409, 'etapa_no_permite', 'Las fechas solo se pueden cambiar antes de la apertura; durante la consulta solo se puede extender el cierre. El motivo obligatorio sí se puede cambiar.');
-        }
-        $nuevo = $this->consulta->dto();
+        $antes = $this->consulta->dto();
+        $this->consulta->guardar($apertura, $cierre, $e['motivoObligatorio']);
         $this->auditoria->registrar($admin['id'], 'actualizar_consulta', 'consulta', 1, [
-            'apertura' => $nuevo['apertura'], 'cierre' => $nuevo['cierre'], 'motivoObligatorio' => $nuevo['motivoObligatorio'],
+            'antes' => $antes, 'despues' => $this->consulta->dto(),
         ]);
-        return Respuesta::json(200, $nuevo);
+        return Respuesta::json(200, $this->consulta->dtoAdmin($this->reinicioPermitido));
     }
 
     /**
-     * Lee el CSV: encabezado exacto `nombre,correo,laboratorio` (o con `;`), UTF-8 con o sin BOM.
+     * Limpia un campo del CSV: NBSP pasa a espacio; se quitan los caracteres de formato invisibles
+     * (\p{Cf}: BOM, U+200B/C/D, guion blando…), los espacios de los extremos y un par de comillas
+     * tipográficas que envuelva el campo.
+     */
+    private static function limpiarCampo(?string $v): string
+    {
+        $v = str_replace("\u{00A0}", ' ', (string) $v);
+        $v = self::recortar(preg_replace('/\p{Cf}/u', '', $v) ?? $v);
+        if (preg_match('/\A[“”„‟‘’‚‛«»‹›](.*)[“”„‟‘’‚‛«»‹›]\z/us', $v, $m) === 1) {
+            $v = self::recortar($m[1]);
+        }
+        return $v;
+    }
+
+    /** Recorta espacios Unicode de los extremos (como `String.prototype.trim` del cliente). */
+    private static function recortar(string $v): string
+    {
+        return preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $v) ?? trim($v);
+    }
+
+    /**
+     * Separador según la primera línea: el primer candidato (tabulador, `;`, `,`) con el que
+     * `str_getcsv` da exactamente 3 campos; si ninguno, el primero que aparezca en la línea.
+     */
+    private static function separadorCsv(string $linea): string
+    {
+        foreach (["\t", ';', ','] as $candidato) {
+            if (count(str_getcsv($linea, $candidato, '"', '')) === 3) {
+                return $candidato;
+            }
+        }
+        return str_contains($linea, "\t") ? "\t" : (str_contains($linea, ';') ? ';' : ',');
+    }
+
+    /**
+     * Lee el CSV de usuarios (UTF-8, con o sin BOM). El encabezado `nombre,correo,laboratorio` es opcional:
+     * se salta si la primera línea no vacía, normalizada, coincide con él. El separador se detecta en esa
+     * misma línea (`separadorCsv`: tabulador de Excel, `;` o `,`). Cada campo se limpia (espacios,
+     * caracteres invisibles, comillas tipográficas) y el correo se pasa a minúsculas. Las líneas con solo
+     * separadores, espacios o invisibles (filas vacías de Excel) se ignoran.
      * Si hay líneas inválidas o correos duplicados (en el CSV o ya existentes), 400 con la lista de líneas.
      * @return list<array{nombre:string,correo:string,laboratorio:string}>
      */
@@ -230,23 +334,24 @@ final class AdminCtl
         if (!mb_check_encoding($csv, 'UTF-8')) {
             throw Entrada::invalido('csv', 'debe estar en UTF-8');
         }
-        // Líneas en blanco antes del encabezado: se saltan, pero cuentan para los números de línea.
+        // Líneas en blanco (o solo con separadores, espacios o invisibles) antes de la primera: se saltan,
+        // pero cuentan para los números de línea.
         $desfase = 0;
-        if (preg_match('/\A(?:[ \t]*\r?\n)+/', $csv, $m) === 1) {
+        if (preg_match('/\A(?:[\t;,\p{Z}\p{Cf}]*\r?\n)+/u', $csv, $m) === 1) {
             $desfase = substr_count($m[0], "\n");
             $csv = substr($csv, strlen($m[0]));
         }
         $primera = rtrim(strtok($csv, "\n") ?: '', "\r");
-        $sep = match (strtolower(trim($primera))) {
-            'nombre,correo,laboratorio' => ',',
-            'nombre;correo;laboratorio' => ';',
-            default => throw Entrada::invalido('csv', 'el encabezado debe ser exactamente «nombre,correo,laboratorio» (o con «;»)'),
-        };
+        $sep = self::separadorCsv($primera);
+        $celdas = array_map(fn ($v) => mb_strtolower(self::limpiarCampo($v)), str_getcsv($primera, $sep, '"', ''));
+        $conEncabezado = $celdas === ['nombre', 'correo', 'laboratorio'];
 
         $flujo = fopen('php://temp', 'r+');
         fwrite($flujo, $csv);
         rewind($flujo);
-        fgetcsv($flujo, null, $sep, '"', ''); // encabezado
+        if ($conEncabezado) {
+            fgetcsv($flujo, null, $sep, '"', '');
+        }
         $filas = [];
         $invalidas = [];
         $duplicadas = [];
@@ -258,8 +363,9 @@ final class AdminCtl
             if ($reg === false) {
                 break;
             }
-            if ($reg === [null]) {
-                continue; // línea en blanco
+            $reg = array_map(fn ($v) => self::limpiarCampo($v), $reg);
+            if (self::limpiarCampo(str_replace(["\t", ';', ','], '', implode('', $reg))) === '') {
+                continue; // línea en blanco o solo con separadores, espacios o invisibles (fila vacía de Excel)
             }
             if (count($filas) + count($invalidas) + count($duplicadas) >= self::MAX_FILAS_CSV) {
                 fclose($flujo);
@@ -269,7 +375,8 @@ final class AdminCtl
                 $invalidas[] = $linea;
                 continue;
             }
-            [$nombre, $correo, $lab] = array_map(fn ($v) => trim((string) $v), $reg);
+            [$nombre, $correo, $lab] = $reg;
+            $correo = mb_strtolower($correo);
             if ($nombre === '' || $lab === '' || mb_strlen($nombre) > 190 || mb_strlen($lab) > 190
                 || mb_strlen($correo) > 254 || filter_var($correo, FILTER_VALIDATE_EMAIL) === false) {
                 $invalidas[] = $linea;

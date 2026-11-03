@@ -15,11 +15,9 @@
  * `Origin` (Node no la manda sola y el servidor la exige en las escrituras, docs/api.md §1.2);
  * las sugerencias salen del motor real (`calcularSugerencias`) y el `.tex` de `exportarLatex`.
  *
- * Usa SQL de desarrollo (vía `docker compose exec bd`) en dos momentos, porque la API no
- * permite fechas pasadas:
- *   - al inicio, vuelve la consulta a preparación (fechas en NULL) para que la prueba se
- *     pueda repetir;
- *   - en el paso 7, adelanta el cierre para pasar a edición final.
+ * Usa SQL de desarrollo (vía `docker compose exec bd`) una sola vez: al inicio, antes de que
+ * exista el admin de la corrida, vuelve la consulta a preparación (fechas en NULL) para que la
+ * prueba se pueda repetir. El cierre del paso 7 ya va por la API («Cerrar ahora»: cierre = ahora).
  * Cada corrida usa correos y slug únicos, así no choca con corridas anteriores.
  *
  * NUNCA usar contra producción: el capítulo es un fixture sintético del repo.
@@ -261,6 +259,27 @@ async function main(): Promise<void> {
   });
   comprobar(cap.id > 0 && cap.versionId > 0, `POST /admin/capitulos → capítulo ${cap.id}, versión base ${cap.versionId}`);
 
+  // Un capítulo de descarte: se renumera, se retitula y se borra (sin aportes, en preparación).
+  const descarte = await admin.api.post<CapituloCreado>('/admin/capitulos', {
+    slug: `${slug}-descarte`,
+    titulo: 'Descarte',
+    orden: 2,
+    texOriginal: tex,
+    docJson: docImportado,
+  });
+  const editado = await admin.api.patch<{ id: number }>(`/admin/capitulos/${descarte.id}`, { orden: 9, titulo: 'Descarte renombrado' });
+  const trasEditar = (await admin.api.get<CapituloLista[]>('/capitulos')).find((c) => c.id === descarte.id);
+  comprobar(
+    editado.id === descarte.id && trasEditar?.orden === 9 && trasEditar.titulo === 'Descarte renombrado',
+    'PATCH /admin/capitulos/{id} cambia orden y título',
+  );
+  await admin.api.del(`/admin/capitulos/${descarte.id}`);
+  const trasBorrar = await admin.api.get<CapituloLista[]>('/capitulos');
+  comprobar(
+    !trasBorrar.some((c) => c.id === descarte.id) && trasBorrar.some((c) => c.id === cap.id),
+    'DELETE /admin/capitulos/{id} borra el capítulo sin aportes (y deja el otro)',
+  );
+
   paso('3. Importa 3 laboratorios y un revisor');
   const filas = [
     ['Ana Humo', `lab1-${sello}@${dominio}`, 'Laboratorio Norte'],
@@ -291,11 +310,18 @@ async function main(): Promise<void> {
     motivoObligatorio: false,
   });
   comprobar(consulta.etapa === 'consulta', `PUT /admin/consulta → etapa consulta (cierre ${consulta.cierre})`);
-  await esperarError(
-    admin.api.post('/admin/capitulos', { slug, titulo: 'x', orden: 1, texOriginal: tex, docJson: docImportado }),
-    'etapa_no_permite',
-    'con la consulta abierta ya no se pueden subir capítulos',
-  );
+  // Con la consulta abierta se sube un capítulo nuevo y, sin aportes, se borra.
+  const tardio = await admin.api.post<CapituloCreado>('/admin/capitulos', {
+    slug: `${slug}-tardio`,
+    titulo: 'Tardío',
+    orden: 3,
+    texOriginal: tex,
+    docJson: docImportado,
+  });
+  await admin.api.del(`/admin/capitulos/${tardio.id}`);
+  ok('con la consulta abierta se sube un capítulo nuevo y se borra (sin aportes)');
+  await admin.api.patch(`/admin/capitulos/${cap.id}`, { titulo: 'Capítulo de humo (sintético)' });
+  ok('con la consulta abierta el título se sigue pudiendo cambiar (PATCH /admin/capitulos/{id})');
 
   paso('5. Cada laboratorio entra, edita y guarda (sugerencias del motor real)');
   const labs = [nuevoActor('Laboratorio Norte'), nuevoActor('Laboratorio Centro'), nuevoActor('Laboratorio Sur')];
@@ -400,17 +426,20 @@ async function main(): Promise<void> {
 
   paso('6. Los laboratorios comentan');
   await labs[1].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+    versionId: base.versionId,
     bloqueId: 'b2',
     rango: { desde: 0, hasta: 4 },
     texto: 'Proponemos «partido»; conversarlo en la reunión.',
   });
   const c2 = await labs[2].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+    versionId: base.versionId,
     bloqueId: 'b7',
     rango: { desde: 0, hasta: 9 },
     texto: 'Borrador de comentario.',
   });
   await labs[2].api.patch(`/comentarios/${c2.id}`, { texto: '¿Cuántas repeticiones se registran?' });
   const c3 = await labs[2].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+    versionId: base.versionId,
     bloqueId: 'b8',
     rango: { desde: 0, hasta: 7 },
     texto: 'Comentario que se borrará.',
@@ -424,12 +453,26 @@ async function main(): Promise<void> {
   const comNorte = await labs[0].api.get<Comentario[]>(`/capitulos/${cap.id}/comentarios`);
   comprobar(comNorte.length === 0, 'Norte no ve los comentarios de otros laboratorios');
 
-  paso('7. Se adelanta el cierre (SQL de desarrollo: la API no admite fechas pasadas)');
-  sqlDesarrollo(
-    'UPDATE consulta SET apertura = UTC_TIMESTAMP() - INTERVAL 1 HOUR, cierre = UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE id = 1',
+  // Con aportes, el texto del capítulo ya no se reemplaza ni se borra.
+  await esperarError(
+    admin.api.post('/admin/capitulos', { slug, titulo: 'x', orden: 1, texOriginal: tex, docJson: docImportado }),
+    'operacion_no_permitida',
+    'con aportes ya no se puede reemplazar el texto del capítulo',
   );
+  await esperarError(admin.api.del(`/admin/capitulos/${cap.id}`), 'operacion_no_permitida', 'con aportes ya no se puede borrar el capítulo');
+
+  paso('7. El admin cierra la consulta ahora (PUT /admin/consulta con cierre = ahora)');
+  await admin.api.put<Consulta>('/admin/consulta', {
+    apertura: consulta.apertura,
+    cierre: sinFracciones(new Date()),
+    motivoObligatorio: false,
+  });
   const cerrada = await admin.api.get<Consulta>('/consulta');
   comprobar(cerrada.etapa === 'edicion_final', 'GET /consulta → etapa edicion_final');
+  comprobar(
+    (cerrada.aportes ?? 0) > 0 && cerrada.decisionesTomadas === 0 && typeof cerrada.reinicioPermitido === 'boolean',
+    `GET /consulta (admin): ${cerrada.aportes} aportes, ${cerrada.decisionesTomadas} decisiones`,
+  );
   await esperarError(
     labs[0].api.put(`/capitulos/${cap.id}/copia`, { versionId: base.versionId, docJson: base.docJson, sugerencias: [] }),
     'etapa_no_permite',

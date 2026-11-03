@@ -22,8 +22,8 @@ function vistaIndice(): Vista {
             'ul',
             { class: 'capitulos' },
             ...[
-              ['#/admin/consulta', 'Consulta', 'Fechas de apertura y cierre.'],
-              ['#/admin/capitulos', 'Capítulos', 'Importar y subir capítulos .tex (solo en preparación).'],
+              ['#/admin/consulta', 'Consulta', 'Etapa actual, abrir o cerrar la consulta y fechas de apertura y cierre.'],
+              ['#/admin/capitulos', 'Capítulos', 'Subir capítulos .tex, reemplazar su texto, numerarlos y borrarlos.'],
               ['#/admin/usuarios', 'Usuarios', 'Importar cuentas, claves, roles y activación.'],
             ].map(([href, t, d]) =>
               el('li', { class: 'capitulo' }, el('div', { class: 'capitulo-titulo' }, el('a', { href }, t)), el('div', { class: 'capitulo-datos' }, d)),

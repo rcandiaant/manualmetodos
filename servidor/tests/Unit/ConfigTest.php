@@ -53,6 +53,30 @@ final class ConfigTest extends TestCase
         }
     }
 
+    public function test_reinicio_pruebas_solo_con_1(): void
+    {
+        $base = ['CLAVE_CIFRADO' => base64_encode(str_repeat('a', 32)), 'CLAVE_INDICE' => base64_encode(str_repeat('b', 32))];
+        $this->assertFalse(Config::desdeArreglo($base)->reinicioPruebas);
+        foreach (['0', '', 'si', 'true', '01', '2', '1 1'] as $v) {
+            $this->assertFalse(Config::desdeArreglo($base + ['REINICIO_PRUEBAS' => $v])->reinicioPruebas, $v);
+        }
+        // El valor recortado debe ser exactamente 1 (el .env además quita las comillas).
+        foreach (['1', ' 1', "1 	"] as $v) {
+            $this->assertTrue(Config::desdeArreglo($base + ['REINICIO_PRUEBAS' => $v])->reinicioPruebas, $v);
+        }
+        file_put_contents($this->env, "CLAVE_CIFRADO={$base['CLAVE_CIFRADO']}
+CLAVE_INDICE={$base['CLAVE_INDICE']}
+REINICIO_PRUEBAS = \"1\" 
+");
+        $this->assertTrue(Config::desdeEntorno($this->env)->reinicioPruebas);
+
+        file_put_contents($this->env, "CLAVE_CIFRADO={$base['CLAVE_CIFRADO']}
+CLAVE_INDICE={$base['CLAVE_INDICE']}
+REINICIO_PRUEBAS=1
+");
+        $this->assertTrue(Config::desdeEntorno($this->env)->reinicioPruebas);
+    }
+
     public function test_env_malformado_lanza_excepcion(): void
     {
         file_put_contents($this->env, "basura sin igual\nCLAVE_CIFRADO=%%%\n");

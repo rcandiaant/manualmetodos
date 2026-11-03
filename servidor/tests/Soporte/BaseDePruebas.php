@@ -34,9 +34,10 @@ trait BaseDePruebas
         return "mysql:host=$host;dbname=$nombre;charset=utf8mb4";
     }
 
-    public static function configPruebas(): Config
+    /** @param array<string,string> $extra variables adicionales del .env (p. ej. REINICIO_PRUEBAS) */
+    public static function configPruebas(array $extra = []): Config
     {
-        return Config::desdeArreglo([
+        return Config::desdeArreglo($extra + [
             'BD_DSN' => self::dsnPruebas(),
             'BD_USUARIO' => getenv('BD_USUARIO') ?: '',
             'BD_CLAVE' => getenv('BD_CLAVE') ?: '',

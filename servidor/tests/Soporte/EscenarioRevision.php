@@ -77,7 +77,7 @@ trait EscenarioRevision
                 ]],
             ]);
             self::assertSame(200, $r->estado, $r->cuerpo());
-            $r = $c->post("/capitulos/{$this->cap}/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 2], 'texto' => "Comentario $n"]);
+            $r = $c->post("/capitulos/{$this->cap}/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 2], 'texto' => "Comentario $n", 'versionId' => $this->ver]);
             self::assertSame(201, $r->estado, $r->cuerpo());
             $com[] = $r->datos['id'];
             $sug[] = (int) self::$bd->query("SELECT id FROM sugerencias WHERE usuario_id = {$u['id']}")->fetchColumn();

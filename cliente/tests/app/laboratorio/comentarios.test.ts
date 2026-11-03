@@ -57,7 +57,7 @@ describe('comentarios del laboratorio', () => {
     const posts = llamadas.filter((l) => l.metodo === 'POST');
     expect(posts).toHaveLength(1);
     expect(posts[0].url).toBe('/api/capitulos/3/comentarios');
-    expect(posts[0].cuerpo).toEqual({ bloqueId: 'p1', rango: { desde: 2, hasta: 3 }, texto: 'Debería decir «dos y medio».' });
+    expect(posts[0].cuerpo).toEqual({ bloqueId: 'p1', rango: { desde: 2, hasta: 3 }, texto: 'Debería decir «dos y medio».', versionId: 7 });
     expect(form.hidden).toBe(true);
     const items = itemsComentario(raiz);
     expect(items).toHaveLength(1);
@@ -65,6 +65,33 @@ describe('comentarios del laboratorio', () => {
     // Anclado visualmente a su bloque en el editor.
     const ancla = raiz.querySelector('.ProseMirror .comentario-ancla') as HTMLElement;
     expect(ancla?.textContent).toBe('dos');
+  });
+
+  it('un comentario sobre una versión reemplazada (409 version_obsoleta) deja la página en solo lectura y el texto para copiar', async () => {
+    const { vista, raiz, llamadas } = montar({
+      base: BASE,
+      manejar: (l) => (l.metodo === 'POST' ? error(409, 'version_obsoleta') : undefined),
+    });
+    await vista.listo;
+    const ed = vista.editor()!;
+    const p = posDe(ed, 'dos');
+    ed.commands.setTextSelection({ from: p, to: p + 3 });
+    botonTexto(raiz, 'Comentar')!.click();
+    const form = raiz.querySelector('.comentario-nuevo') as HTMLElement;
+    const area = form.querySelector('textarea') as HTMLTextAreaElement;
+    escribirCampo(area, 'Texto que no se pierde.');
+    botonTexto(form, 'Guardar comentario')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(llamadas.filter((l) => l.metodo === 'POST')).toHaveLength(1);
+    expect(vista.editor()!.isEditable).toBe(false);
+    const alerta = raiz.querySelector('[role="alert"].error-guardado') as HTMLElement;
+    expect(alerta.hidden).toBe(false);
+    expect(alerta.textContent).toContain('versión del capítulo cambió');
+    expect(alerta.textContent).toContain('comentarios sin guardar');
+    const errorForm = form.querySelector('[role="alert"]') as HTMLElement;
+    expect(errorForm.textContent).toContain('cambió');
+    expect(area.value).toBe('Texto que no se pierde.');
+    expect(form.hidden).toBe(false);
   });
 
   it('comentar sin seleccion avisa y no envia nada', async () => {
@@ -179,7 +206,7 @@ describe('comentarios del laboratorio', () => {
     botonTexto(form, 'Guardar comentario')!.click();
     await vi.advanceTimersByTimeAsync(0);
     const post = llamadas.find((l) => l.metodo === 'POST')!;
-    expect(post.cuerpo).toEqual({ bloqueId: 'e1', rango: { desde: 0, hasta: 1 }, texto: 'Este entorno no se entiende.' });
+    expect(post.cuerpo).toEqual({ bloqueId: 'e1', rango: { desde: 0, hasta: 1 }, texto: 'Este entorno no se entiende.', versionId: 7 });
     // El bloque especial sigue intacto y queda marcado como comentado.
     expect(JSON.stringify(ed.getJSON())).toContain('\\\\begin{raro}');
     expect(raiz.querySelector('.ProseMirror [data-tipo="especial"].comentario-ancla-bloque')).not.toBeNull();

@@ -29,13 +29,14 @@ Este documento es el contrato entre el servidor PHP (`servidor/`) y el cliente (
 | 404 | `no_encontrado` | la ruta no existe, el recurso no existe **o es de otro laboratorio** (no se distingue), o un `{id}`/`{uid}` con formato inválido |
 | 405 | `metodo_no_permitido` | la ruta existe con otro método (con cabecera `Allow`). No hay CORS: `OPTIONS` sobre una ruta existente da 405, y sobre una inexistente, 404. Un preflight de otro sitio (`Origin` ajeno o `Sec-Fetch-Site: cross-site`) da antes 403 `origen_invalido`, porque esa comprobación va antes del enrutado (§1.2) |
 | 409 | `etapa_no_permite` | escritura fuera de su etapa (ver §3) |
-| 409 | `version_obsoleta` | `PUT …/copia` con un `versionId` que ya no es la base vigente |
-| 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida de capítulo, guardado de copia). Se puede reintentar |
-| 409 | `operacion_no_permitida` | un admin intenta desactivarse o quitarse el rol `admin` a sí mismo |
+| 409 | `version_obsoleta` | `PUT …/copia` o `POST …/comentarios` con un `versionId` que ya no es la base vigente (p. ej. el admin reemplazó el texto del capítulo durante la consulta) |
+| 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida o borrado de capítulo, guardado de copia o comentario mientras se reemplaza el capítulo), o un borrado de capítulo que la base rechaza por un aporte recién creado. Se puede reintentar |
+| 409 | `operacion_no_permitida` | un admin intenta desactivarse o quitarse el rol `admin` a sí mismo, o borrar un capítulo que ya tiene aportes, o reemplazar el texto de un capítulo que ya tiene aportes (§4.6) |
 | 413 | `cuerpo_muy_grande` | el cuerpo supera el tope de la ruta (§1.4) |
 | 415 | `tipo_no_soportado` | hay cuerpo y `Content-Type` no es `application/json` |
 | 422 | `documento_invalido` | `docJson` o los nodos de una sugerencia no cumplen el esquema del documento |
 | 429 | `demasiados_intentos` | login bloqueado temporalmente (con cabecera `Retry-After` en segundos) |
+| 500 | `respaldo_fallido` | `POST /admin/reiniciar` no pudo escribir el respaldo previo; no se borró nada (§4.6) |
 | 500 | `error_interno` | error no previsto; el detalle va solo al `error_log` del servidor |
 
 ### 1.2 Cabeceras obligatorias del cliente
@@ -139,12 +140,18 @@ Se calculan por fecha en cada petición, con la fila única de `consulta`:
 
 | Escritura | Etapa permitida |
 |---|---|
-| `POST /admin/capitulos`, `PUT /admin/consulta` (si cambian las fechas) | preparacion (durante la consulta solo se puede **extender** el cierre, §4.6) |
+| `POST /admin/capitulos`, `PATCH`/`DELETE /admin/capitulos/{id}`, `PUT /admin/consulta`, `POST /admin/reiniciar` | cualquiera: el admin no depende de la etapa (§4.6). Reemplazar el texto de un capítulo o borrarlo exige que no tenga aportes, y eso da 409 `operacion_no_permitida`, no `etapa_no_permite` |
 | `PUT …/copia`, `PATCH …/sugerencias/{uid}`, `POST …/comentarios`, `PATCH`/`DELETE /comentarios/{id}` | consulta |
 | `PATCH /sugerencias/{id}`, `PATCH /comentarios/{id}/resolucion`, `PUT …/final` | edicion_final |
 
 - Fuera de su etapa, una escritura responde 409 `etapa_no_permite` y no cambia nada.
-- Las etapas de laboratorio y revisor no se solapan. Por eso un re-guardado de la copia conserva el `estado` de cada sugerencia sin riesgo de pisar una resolución.
+- El admin puede mover las fechas en cualquier momento (abrir ahora, cerrar ahora, reabrir, volver a preparación; §4.6). La etapa se recalcula en la petición siguiente. Volver a preparación conserva todo el trabajo; solo impide editar hasta que se vuelva a abrir.
+- Las etapas de laboratorio y revisor no se solapan, pero el admin puede **reabrir** la consulta después de que el revisor decidió. El `uid` de una sugerencia es un hash de su contenido (`idSugerencia`, `cliente/src/cambios/identidad.ts`: tipo, original, propuesta, grupo y lugar de una inserción). Por eso, al re-guardar la copia (§4.3):
+  - una sugerencia que vuelve con el mismo `uid` **conserva su decisión**, aunque cambien sus posiciones (`copia`, `base`, `orden`), por ejemplo si el laboratorio escribió antes en el mismo bloque;
+  - si el laboratorio **cambia la propuesta**, llega con otro `uid`: la anterior se borra junto con su decisión y la nueva entra `pendiente`;
+  - por defensa, si un cliente reutilizara un `uid` con otro contenido (comparado con los mismos campos del hash, sin las posiciones), la sugerencia vuelve a `pendiente` y se limpian `notaResolucion`, `derivadaReunion` y quién y cuándo resolvió.
+
+  Así ningún contenido que el revisor no decidió entra a la versión final como aceptado.
 - Las lecturas valen en cualquier etapa, salvo `GET …/aportes` (consulta y edicion_final) y `GET …/mis-aportes` (solo edicion_final).
 
 Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o recurso (404) y entrada (400/422). En `PATCH /comentarios/{id}` y en las resoluciones la entrada se valida antes de buscar el id (rol, etapa, 400, 404). La validación no depende del id, así que eso no revela nada.
@@ -161,7 +168,7 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 | `POST /sesion` | — | — | 200 `{usuario, csrf}` · 401 · 429 |
 | `GET /sesion` | cualquiera | — | 200 `{usuario, csrf}` · 401 `sin_sesion` |
 | `DELETE /sesion` | cualquiera | — | 204 · 401 `sin_sesion` |
-| `GET /consulta` | cualquiera | — | `{apertura, cierre, etapa, motivoObligatorio}` |
+| `GET /consulta` | cualquiera | — | `{apertura, cierre, etapa, motivoObligatorio}`; el admin recibe además `decisionesTomadas`, `aportes` y `reinicioPermitido` |
 | `GET /capitulos` | cualquiera | — | lista de capítulos |
 | `GET /capitulos/{id}/base` | cualquiera | — | `{versionId, docJson}` + `ETag` / 304 |
 | `GET /capitulos/{id}/copia` | laboratorio | — | `{docJson, actualizado, versionId, sugerencias[]}` o `{docJson: null}` |
@@ -177,12 +184,15 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 | `PATCH /comentarios/{id}/resolucion` | revisor | edicion_final | 200 `{id}` |
 | `PUT /capitulos/{id}/final` | revisor | edicion_final | 200 `{versionId}` |
 | `GET /capitulos/{id}/final` | revisor | — | `{versionId, docJson, tex}` · 404 |
-| `POST /admin/capitulos` | admin | preparacion | 201 `{id, versionId}` |
+| `POST /admin/capitulos` | admin | — | 201 `{id, versionId}` · 409 `operacion_no_permitida` si reemplaza el texto de un capítulo con aportes |
+| `PATCH /admin/capitulos/{id}` | admin | — | 200 `{id}` · 404 |
+| `DELETE /admin/capitulos/{id}` | admin | — | 204 · 404 · 409 `operacion_no_permitida` si tiene aportes |
 | `GET /admin/usuarios` | admin | — | lista de usuarios |
 | `POST /admin/usuarios/importar` | admin | — | 201 `[{correo, clave}]` |
 | `POST /admin/usuarios/{id}/clave` | admin | — | 200 `{clave}` |
 | `PATCH /admin/usuarios/{id}` | admin | — | 200 `{id}` |
-| `PUT /admin/consulta` | admin | preparacion (fechas) / consulta (solo extender el cierre) / cualquiera (motivo) | 200, igual que `GET /consulta` |
+| `PUT /admin/consulta` | admin | — | 200, igual que `GET /consulta` para el admin |
+| `POST /admin/reiniciar` | admin | — | 200 `{respaldo, borrados}` · 400 · 500 `respaldo_fallido`. **Solo existe con `REINICIO_PRUEBAS=1`**; si no, 404 |
 
 ### 4.1 Consulta
 
@@ -193,6 +203,20 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 ```
 
 `motivoObligatorio` lo hace cumplir el cliente (1C): el servidor solo lo guarda y lo expone.
+
+**Solo para el admin** (rol `admin`), la respuesta trae tres campos más, que el cliente usa para advertir las consecuencias de cambiar las fechas:
+
+```json
+{"apertura": "…", "cierre": "…", "etapa": "consulta", "motivoObligatorio": false, "decisionesTomadas": 3, "aportes": 42, "reinicioPermitido": false}
+```
+
+- `decisionesTomadas`: sugerencias con `estado` distinto de `pendiente` (de todos los capítulos).
+- `aportes`: sugerencias más comentarios (de todos los capítulos).
+- `versionesFinal`: versiones finales guardadas por el revisor (de todos los capítulos). El cliente lo usa para advertir al reabrir.
+- `reinicioPermitido`: `true` solo si el `.env` tiene `REINICIO_PRUEBAS=1` (ver `POST /admin/reiniciar`, §4.6).
+- `ahora`: la hora del servidor (ISO en UTC). Las acciones rápidas del cliente («Abrir ahora», «Cerrar ahora»…) calculan con ella y no con el reloj del navegador.
+
+Laboratorios y revisores nunca reciben estos campos.
 
 ### 4.2 Capítulos
 
@@ -234,7 +258,8 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 
 - Responde 200 `{"actualizado": "…Z"}`.
 - Reemplaza la copia y **todo** el conjunto de sugerencias propias del capítulo en una sola transacción: las que no vienen se borran.
-- Para las sugerencias que ya existían (mismo `uid`, con distinción de mayúsculas), se conservan su `motivo` y su `estado`.
+- Para las sugerencias que ya existían (mismo `uid`, con distinción de mayúsculas), se conserva su `motivo`. Su decisión (`estado`, nota, derivada, quién y cuándo resolvió) se conserva aunque cambien las posiciones (`copia`, `base`, `orden`); solo si cambiara el contenido que forma el `uid` vuelve a `pendiente` y se limpia (§3).
+- La versión base se comprueba dos veces: antes de validar el cuerpo y, de nuevo, dentro de la transacción, con la fila del capítulo bloqueada en modo compartido (`LOCK IN SHARE MODE`). El reemplazo y el borrado de capítulos toman esa misma fila con `FOR UPDATE` antes de comprobar los aportes, así que los dos caminos se serializan: si el admin reemplazó el texto entre medio, el guardado da 409 `version_obsoleta`, y si el reemplazo está en curso, el guardado espera (con la espera agotada, 409 `conflicto_concurrente`). Nunca queda una copia sobre una versión reemplazada.
 - Las sugerencias nuevas toman el `motivo` del cuerpo, si viene.
 - Campos de la sugerencia:
   - obligatorios: `id`, `bloqueId`, `base`, `copia`, `original`, `propuesta` y `tipo` ∈ `contenido`, `formato`, `bloque-insertado`, `bloque-eliminado`, además de `autor`;
@@ -255,8 +280,10 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 ### 4.4 Comentarios del laboratorio
 
 - **`GET /capitulos/{id}/comentarios`** devuelve `[{"id": 5, "bloqueId": "f1-p1", "rango": {"desde": 0, "hasta": 2}, "texto": "…", "estado": "abierto", "creado": "…Z"}]`, solo los propios, en orden de `id`.
-- **`POST /capitulos/{id}/comentarios`** con `{"bloqueId": "f1-p1", "rango": {"desde": 0, "hasta": 2}, "texto": "…"}` responde 201 `{"id": 5}`.
-- **`PATCH /comentarios/{id}`** con `{"texto": "…"}` responde 200 `{"id": 5}`. Solo el texto es editable.
+- **`POST /capitulos/{id}/comentarios`** con `{"bloqueId": "f1-p1", "rango": {"desde": 0, "hasta": 2}, "texto": "…", "versionId": 7}` responde 201 `{"id": 5}`.
+  - `versionId` (obligatorio, entero) es la versión base sobre la que se comenta, la de `GET …/base`. Si ya no es la vigente (el admin reemplazó el texto), responde 409 `version_obsoleta` y no crea nada; el cliente pasa a solo lectura y deja el texto en el campo para copiarlo, igual que con la copia.
+  - Se comprueba también dentro de la transacción, con el capítulo bloqueado en modo compartido, como en `PUT …/copia` (§4.3). Un reemplazo en curso hace esperar; con la espera agotada, 409 `conflicto_concurrente`.
+- **`PATCH /comentarios/{id}`** con `{"texto": "…"}` responde 200 `{"id": 5}`. Solo el texto es editable. No lleva `versionId`: si el comentario existe, el capítulo tiene aportes y su texto ya no se puede reemplazar.
 - **`DELETE /comentarios/{id}`** responde 204.
 - Un comentario ajeno o inexistente da 404. Los campos extra (`usuario_id`, `estado`, `resuelto_por`, …) se ignoran.
 
@@ -309,16 +336,39 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
   - `orden` es un entero de 0 a 100 000;
   - `texOriginal` va de 1 B a 1 MB;
   - `docJson` pasa por el validador del documento.
-- La etapa se comprueba antes que el cuerpo: fuera de preparación da 409.
+- **Un capítulo nuevo (slug nuevo) se sube en cualquier etapa.** Durante la consulta queda disponible para los laboratorios apenas se sube.
 - Responde 201 `{"id": 3, "versionId": 7}`.
-- Si el slug ya existe, actualiza `titulo` y `orden` y crea una nueva versión base.
-- Dos subidas simultáneas del mismo slug pueden dar 409 `conflicto_concurrente`.
+- **Reemplazar el texto** (slug existente): actualiza `titulo` y `orden` y crea una nueva versión base, en cualquier etapa, **solo si el capítulo no tiene aportes** (las mismas condiciones que el borrado, abajo). Si los tiene, responde 409 `operacion_no_permitida` y no cambia nada. El mensaje dice cuántos laboratorios (usuarios distintos con copias, instantáneas, sugerencias o comentarios en el capítulo) trabajaron en él: «2 laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto.». Si el único aporte es una versión final: «El capítulo ya tiene una versión final; no se puede reemplazar el texto.». La comprobación se hace con la fila del capítulo bloqueada (`FOR UPDATE`), como en el borrado.
+- Dos subidas simultáneas del mismo slug, o una espera de bloqueo agotada (un guardado de laboratorio en curso sobre el capítulo), dan 409 `conflicto_concurrente`.
+
+**`PATCH /admin/capitulos/{id}`** con `{"orden"?: 3, "titulo"?: "…"}`:
+- Cambia la numeración y/o el título en **cualquier etapa**: son solo presentación y no crean una versión nueva.
+- Hace falta al menos uno de los dos campos (si no, 400). Las reglas son las de la subida: `orden` es un entero de 0 a 100 000 y `titulo` tiene de 1 a 255 caracteres. Los demás campos (`slug`, …) se ignoran.
+- Orden de comprobación: rol, entrada (400) y capítulo (404).
+- Responde 200 `{"id": 3}`. Si el capítulo no existe, 404.
+- Queda en auditoría (`editar_capitulo`) con los valores anteriores y nuevos.
+
+**`DELETE /admin/capitulos/{id}`**:
+- En **cualquier etapa**, solo si el capítulo **no tiene aportes**: ninguna fila en `copias_laboratorio`, `revisiones_copia`, `sugerencias` ni `comentarios`, y ninguna versión `final`. Si los tiene, 409 `operacion_no_permitida` y no cambia nada.
+- Borra en una transacción las versiones del capítulo y luego el capítulo, e invalida en APCu sus documentos base.
+- Responde 204 sin cuerpo. Si el capítulo no existe, 404.
+- Si la base rechaza el borrado (interbloqueo, espera agotada o una FK por un aporte recién creado), responde 409 `conflicto_concurrente` y no cambia nada.
+- Queda en auditoría (`borrar_capitulo`) con `slug`, `titulo`, `orden` y los ids de las versiones borradas.
 
 **`GET /admin/usuarios`** devuelve `[{"id", "nombre", "laboratorio", "correo", "roles", "activo"}]`, ordenado por laboratorio, nombre e id. El correo va descifrado.
 
 **`POST /admin/usuarios/importar`** con `{"csv": "nombre,correo,laboratorio\nAna,ana@lab.cl,Lab Norte"}`:
-- El encabezado debe ser exactamente `nombre,correo,laboratorio`, sin distinguir mayúsculas. El separador puede ser `,` o `;` y se detecta en la primera línea.
-- Se aceptan un BOM UTF-8 opcional y comillas CSV. El texto debe ser UTF-8, y las líneas en blanco se ignoran.
+- Cada línea tiene tres campos: nombre, correo y laboratorio.
+- **El encabezado es opcional.** Si la primera línea no vacía, normalizada, es `nombre<sep>correo<sep>laboratorio`, se salta. Normalizar significa recortar espacios en cada celda, pasar a minúsculas y quitar caracteres invisibles, así que también vale ` Nombre ; Correo ; Laboratorio `. Si no coincide, la primera línea es de datos.
+- **El separador se detecta en la primera línea no vacía**, sea encabezado o datos. Se prueban tabulador, `;` y `,` en ese orden, respetando comillas, y gana el primero que da exactamente 3 campos; por ejemplo, `"Soto; Luis",l@lab.cl,L` usa `,`. Si ninguno da 3, se usa el primero que aparezca en la línea (tabulador, si no `;`, si no `,`). Así se pueden pegar celdas copiadas desde Excel, que llegan separadas por tabulador.
+- Se aceptan un BOM UTF-8 opcional y comillas CSV (`"…"`). El texto debe ser UTF-8. Las líneas en blanco se ignoran, y también las que solo tienen separadores, espacios o caracteres invisibles (por ejemplo `\t\t` de una fila vacía de Excel, o `;;`).
+- Cada campo se limpia antes de validarse:
+  - se recortan los espacios de los extremos, incluidos los espacios Unicode (`\s`, `\p{Z}`);
+  - NBSP (U+00A0) pasa a espacio normal;
+  - se quitan BOM (U+FEFF), U+200B/U+200C/U+200D y demás caracteres de formato Unicode (`\p{Cf}`);
+  - se quita un par de comillas tipográficas (`“…”`, `‘…’`, `«…»`) que envuelva el campo;
+  - el correo se guarda en minúsculas.
+- Los números de línea de los errores son líneas físicas del texto enviado, contando el encabezado si lo hay y las líneas en blanco iniciales.
 - **Máximo 100 filas por importación.**
 - Si hay cualquier línea inválida o un correo repetido (en el CSV o ya existente), responde 400 con los números de línea física y no crea ninguna cuenta.
 - Responde 201 `[{"correo": "ana@lab.cl", "clave": "Xy7…"}]`. Las claves (16 caracteres) **se muestran una sola vez**.
@@ -330,19 +380,26 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - Responde 200 `{"id"}`.
 - Un admin no puede desactivarse ni quitarse `admin` a sí mismo: 409 `operacion_no_permitida`.
 
-**`PUT /admin/consulta`** con `{"apertura": "…", "cierre": "…", "motivoObligatorio": false}`:
-- Los tres campos son obligatorios.
-- Reglas de las fechas:
-  - `cierre > apertura`;
-  - `apertura ≥ ahora − 5 min` (si no, 400 en `apertura`); una apertura igual a "ahora" abre la consulta al instante;
-  - `cierre > ahora` (si no, 400 en `cierre`).
-- Fuera de preparación:
-  - si las fechas son **iguales** a las guardadas, solo cambia `motivoObligatorio` (200);
-  - **durante la consulta se puede extender el cierre** («ampliamos una semana»): misma `apertura` que la guardada (el mismo instante, en cualquier zona), `cierre` posterior al cierre actual y a la hora actual. Responde 200 y también guarda `motivoObligatorio`. No altera ninguna etapa ya vivida;
-  - cualquier otro cambio (acortar el cierre, mover la apertura, o extender una vez cerrada la consulta, ya en edicion_final) responde 409 `etapa_no_permite` y no cambia nada.
+**`PUT /admin/consulta`** con `{"apertura": "…" | null, "cierre": "…" | null, "motivoObligatorio": false}`:
+- Los tres campos son obligatorios (las fechas pueden ser `null`).
+- **Sin restricciones de etapa.** El admin fija las fechas libremente, en cualquier etapa. Reglas:
+  - **ambas `null`**: la consulta vuelve a **preparación** (sin fechas). Los aportes se conservan;
+  - **ambas fechas**: `cierre > apertura` (si no, 400 en `cierre`). **Pueden estar en el pasado**: una apertura pasada abre la consulta al instante, y un cierre igual a "ahora" la cierra («Cerrar ahora»);
+  - **una sola** `null`: 400 en la que falta.
+- Ejemplos de lo que permite: abrir ahora, cerrar ahora, extender o acortar el cierre, mover la apertura, reabrir una consulta ya cerrada (cierre futuro) y volver a preparación.
+- `motivoObligatorio` (booleano) se guarda siempre.
+- Cada cambio queda en auditoría (`actualizar_consulta`) con `{"antes": {…}, "despues": {…}}`: apertura, cierre, etapa y `motivoObligatorio` de antes y después.
+- Responde 200 con el mismo cuerpo que `GET /consulta` para el admin (incluye `decisionesTomadas`, `aportes` y `reinicioPermitido`).
 
-  Por eso el cliente puede reenviar siempre los tres campos.
-- Responde 200 con el mismo cuerpo que `GET /consulta`.
+**`POST /admin/reiniciar`** con `{"confirmacion": "REINICIAR"}` («Reiniciar datos de prueba»):
+- **Solo existe si el `.env` tiene `REINICIO_PRUEBAS=1`**: el valor, sin los espacios de alrededor y sin comillas, tiene que ser `1`. Sin la variable, o con otro valor (`0`, `si`, `01`…), la ruta no se registra y responde 404 `no_encontrado` como cualquier ruta inexistente; además `GET /consulta` da `reinicioPermitido: false` y el cliente oculta la sección. **Hay que quitarla o dejarla en `0` antes de la consulta real** (`docs/despliegue.md` §5.3).
+- Rol admin; CSRF y JSON como el resto. Cualquier `confirmacion` distinta de `"REINICIAR"` exacto da 400 en `confirmacion` y no toca nada.
+- Pasos, en orden:
+  1. **Respaldo** completo de la base con `Mantenimiento\Respaldo` en `var/respaldos/` (mismo formato y rotación que el respaldo diario del cron, §6). Si falla, responde 500 `respaldo_fallido` («No se pudo crear el respaldo de la base; no se borró nada.») y **no se borra nada**.
+  2. En **una transacción**: borra todas las filas de `comentarios`, `sugerencias`, `revisiones_copia` y `copias_laboratorio`, y las de `versiones_capitulo` con `tipo = 'final'`; deja `apertura` y `cierre` de la consulta en `NULL` (vuelve a preparación; `motivoObligatorio` se conserva).
+  3. Se conservan los capítulos con sus versiones base, los usuarios, `auditoria` e `intentos_login`.
+  4. Queda en auditoría (`reiniciar_pruebas`) con el nombre del respaldo y los conteos borrados. El respaldo deja además su propia fila `cron_respaldo`.
+- Responde 200 `{"respaldo": "respaldo-20261103-120000.sql.gz", "borrados": {"comentarios": 2, "sugerencias": 5, "revisiones_copia": 3, "copias_laboratorio": 2, "versiones_final": 1}}`.
 
 ---
 
@@ -398,6 +455,7 @@ Revisar cada punto antes de abrir el sitio:
   - Si el proxy reescribe la cabecera `Host` y no coincide con el `Origin` del navegador, toda escritura da un **403 `origen_invalido`** falso. El proxy debe conservar el `Host` original.
   - Una oficina con NAT (una IP para muchos) comparte el contador de IP. Por eso su umbral es 20 (el de cuenta sigue en 5). Es aceptable a esta escala.
 - [ ] **Zona horaria**: `ZONA_HORARIA=America/Santiago` solo afecta a PHP. La base y la API trabajan en UTC.
+- [ ] **`REINICIO_PRUEBAS` apagado antes de la consulta real.** Durante las pruebas puede estar en `1` para usar «Reiniciar datos de prueba» (§4.6). Antes de abrir la consulta real, quitar la línea del `.env` o dejarla en `0`, y comprobar que en *Administración → Consulta* ya no aparece la «Zona de pruebas».
 - [ ] **Prueba rápida después de desplegar**:
   - `http://<dominio>/api/salud` → 301 a `https://<dominio>/api/salud`;
   - `GET /api/salud` → 200;

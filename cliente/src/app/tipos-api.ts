@@ -59,13 +59,38 @@ export interface Consulta {
   cierre: FechaIso | null;
   etapa: Etapa;
   motivoObligatorio: boolean;
+  /** Solo para el admin: sugerencias con `estado` distinto de `pendiente`. */
+  decisionesTomadas?: number;
+  /** Solo para el admin: sugerencias + comentarios. */
+  aportes?: number;
+  /** Solo para el admin: versiones finales guardadas por el revisor. */
+  versionesFinal?: number;
+  /** Solo para el admin: «Reiniciar datos de prueba» habilitado (REINICIO_PRUEBAS=1). */
+  reinicioPermitido?: boolean;
+  /** Solo para el admin: hora del servidor (las acciones rápidas la usan en vez del reloj del navegador). */
+  ahora?: FechaIso;
 }
 
-/** Cuerpo de `PUT /admin/consulta` (los tres campos son obligatorios). */
+/**
+ * Cuerpo de `PUT /admin/consulta` (los tres campos son obligatorios). Ambas fechas null:
+ * vuelve a preparación; si no, las dos con `cierre > apertura` (pueden estar en el pasado).
+ */
 export interface ConsultaEntrada {
-  apertura: FechaIso;
-  cierre: FechaIso;
+  apertura: FechaIso | null;
+  cierre: FechaIso | null;
   motivoObligatorio: boolean;
+}
+
+/** Respuesta de `POST /admin/reiniciar`. */
+export interface ReinicioResultado {
+  respaldo: string;
+  borrados: {
+    comentarios: number;
+    sugerencias: number;
+    revisiones_copia: number;
+    copias_laboratorio: number;
+    versiones_final: number;
+  };
 }
 
 // §4.2 Capítulos
@@ -156,6 +181,8 @@ export interface ComentarioEntrada {
   bloqueId: string;
   rango: Rango;
   texto: string;
+  /** Versión base sobre la que se comenta: si el admin ya la reemplazó, 409 `version_obsoleta`. */
+  versionId: number;
 }
 
 export interface IdCreado<T = number> {
@@ -202,6 +229,12 @@ export interface CapituloEntrada {
 export interface CapituloCreado {
   id: number;
   versionId: number;
+}
+
+/** Cuerpo de `PATCH /admin/capitulos/{id}`: solo los campos que cambian. */
+export interface CapituloCambio {
+  orden?: number;
+  titulo?: string;
 }
 
 export interface UsuarioAdmin {

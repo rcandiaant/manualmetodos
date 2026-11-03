@@ -7,6 +7,7 @@ namespace Manual\Controladores;
 use Manual\Acceso\Capitulos;
 use Manual\Acceso\Comentarios;
 use Manual\Acceso\Consulta;
+use Manual\Acceso\VersionObsoleta;
 use Manual\Dominio\Etapa;
 use Manual\Dominio\Rol;
 use Manual\Http\ErrorHttp;
@@ -40,7 +41,10 @@ final class ComentariosCtl
         return Respuesta::json(200, $this->comentarios->delCapitulo($u['id'], $cap));
     }
 
-    /** POST `{bloqueId, rango: {desde, hasta}, texto}` → 201 `{id}`. */
+    /**
+     * POST `{bloqueId, rango: {desde, hasta}, texto, versionId}` → 201 `{id}`. `versionId` es la versión base sobre
+     * la que el laboratorio comenta: si el admin ya reemplazó el texto, 409 `version_obsoleta` (como la copia).
+     */
     public function crear(Peticion $p, array $params): Respuesta
     {
         $u = $this->sesion->exigirRol(Rol::LABORATORIO);
@@ -50,7 +54,25 @@ final class ComentariosCtl
         $bloqueId = Entrada::texto($e, 'bloqueId', self::LARGO_BLOQUE);
         $rango = self::rango($e['rango'] ?? null);
         $texto = Entrada::texto($e, 'texto', self::LARGO_TEXTO);
-        $id = $this->comentarios->crear($u['id'], $cap, $bloqueId, $rango, $texto, $this->reloj->ahora());
+        $versionId = $e['versionId'] ?? null;
+        if (!is_int($versionId)) {
+            throw Entrada::invalido('versionId', 'debe ser un número entero');
+        }
+        $obsoleta = new ErrorHttp(409, 'version_obsoleta', 'La versión base cambió: recargue el capítulo.');
+        if ($versionId !== $this->capitulos->versionBaseVigente($cap)) {
+            throw $obsoleta;
+        }
+        try {
+            $id = $this->comentarios->crear($u['id'], $cap, $versionId, $bloqueId, $rango, $texto, $this->reloj->ahora());
+        } catch (VersionObsoleta) {
+            throw $obsoleta;
+        } catch (\PDOException $ex) {
+            // Un reemplazo del capítulo en curso tiene su fila con FOR UPDATE: espera agotada o interbloqueo.
+            if (in_array($ex->errorInfo[1] ?? null, [1213, 1205], true)) {
+                throw new ErrorHttp(409, 'conflicto_concurrente', 'Hay un cambio del capítulo en curso. Reintente.');
+            }
+            throw $ex;
+        }
         return Respuesta::json(201, ['id' => $id]);
     }
 

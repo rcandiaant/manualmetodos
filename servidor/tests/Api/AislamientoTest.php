@@ -212,7 +212,7 @@ final class AislamientoTest extends TestCase
 
         // Comentarios: crear y editar.
         $r = $this->lab2->post("/capitulos/{$this->cap}/comentarios", $prohibidos + [
-            'bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'nuevo',
+            'bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'nuevo', 'versionId' => $this->ver,
         ]);
         self::assertSame(201, $r->estado, $r->cuerpo());
         $idCom = $r->datos['id'];
@@ -296,7 +296,7 @@ final class AislamientoTest extends TestCase
         $autor = 'u' . $this->labU['id'];
 
         // Comentario y motivo: se guardan literales y solo afectan la fila propia.
-        $r = $this->lab->post("/capitulos/$cap/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => $inyeccion]);
+        $r = $this->lab->post("/capitulos/$cap/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => $inyeccion, 'versionId' => $this->ver]);
         self::assertSame(201, $r->estado, $r->cuerpo());
         $idCom = $r->datos['id'];
         self::assertSame($inyeccion, self::$bd->query("SELECT texto FROM comentarios WHERE id = $idCom")->fetchColumn());
@@ -312,7 +312,7 @@ final class AislamientoTest extends TestCase
         self::assertSame($inyeccion, $sug['motivo']);
 
         // bloqueId con inyección en un comentario y en una sugerencia.
-        $r = $this->lab->post("/capitulos/$cap/comentarios", ['bloqueId' => $inyeccion, 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'y']);
+        $r = $this->lab->post("/capitulos/$cap/comentarios", ['bloqueId' => $inyeccion, 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'y', 'versionId' => $this->ver]);
         self::assertSame(201, $r->estado, $r->cuerpo());
         self::assertSame($inyeccion, self::$bd->query("SELECT bloque_id FROM comentarios WHERE id = {$r->datos['id']}")->fetchColumn());
 
