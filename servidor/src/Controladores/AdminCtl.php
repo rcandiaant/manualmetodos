@@ -154,8 +154,9 @@ final class AdminCtl
         try {
             $r = $this->capitulos->subirBase($slug, $titulo, $orden, $tex, $docJson, $admin['id']);
         } catch (\PDOException $ex) {
-            // Subida simultánea del mismo slug: clave duplicada (23000) o interbloqueo (40001).
-            if (in_array((string) $ex->getCode(), ['23000', '40001'], true)) {
+            // Subida simultánea del mismo slug: clave duplicada (23000) o interbloqueo (40001). 1205: espera de
+            // bloqueo agotada (p. ej. un guardado de laboratorio en curso sobre el mismo capítulo).
+            if (in_array((string) $ex->getCode(), ['23000', '40001'], true) || (int) ($ex->errorInfo[1] ?? 0) === 1205) {
                 throw new ErrorHttp(409, 'conflicto_concurrente', 'Otra subida del mismo capítulo está en curso. Reintente.');
             }
             throw $ex;

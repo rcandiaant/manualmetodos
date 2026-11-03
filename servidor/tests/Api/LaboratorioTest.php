@@ -185,7 +185,7 @@ final class LaboratorioTest extends TestCase
         [$c, , $autor] = $this->lab();
         [$otro, , $autorOtro] = $this->lab();
         self::assertSame(200, $this->guardar($c, $cap, $ver, [$this->sug($autor, 'a'), $this->sug($autor, 'b')])->estado);
-        self::assertSame(201, $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 3], 'texto' => 'Ojo'])->estado);
+        self::assertSame(201, $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 3], 'texto' => 'Ojo', 'versionId' => $ver])->estado);
         self::assertSame(200, $this->guardar($otro, $cap, $ver, [$this->sug($autorOtro, 'a')])->estado);
 
         $r = $c->get('/capitulos');
@@ -322,7 +322,7 @@ final class LaboratorioTest extends TestCase
         [$c, , $autor] = $this->lab();
         self::assertSame(200, $this->guardar($c, $cap, $ver, [$this->sug($autor, 'a', ['motivo' => 'Original']), $this->sug($autor, 'b')])->estado);
         self::assertSame(200, $c->patch("/capitulos/$cap/sugerencias/" . "$autor:f1-p1:b", ['motivo' => 'Por PATCH'])->estado);
-        self::$bd->exec("UPDATE sugerencias SET estado = 'aceptada' WHERE uid LIKE '%:a'");
+        self::$bd->exec("UPDATE sugerencias SET estado = 'aceptada'");
 
         $this->reloj->avanzar(60);
         $nueva = $this->sug($autor, 'a', ['propuesta' => [['type' => 'text', 'text' => 'cambiada']], 'motivo' => 'Otro']);
@@ -330,9 +330,11 @@ final class LaboratorioTest extends TestCase
 
         $sugs = $this->copia($c, $cap)['sugerencias'];
         self::assertSame('Original', $sugs[0]['motivo']);
-        self::assertSame('aceptada', $sugs[0]['estado']);
+        // Mismo uid con otra propuesta (un cliente real daría otro uid): por defensa vuelve a pendiente (ReaperturaTest).
+        self::assertSame('pendiente', $sugs[0]['estado']);
         self::assertSame([['type' => 'text', 'text' => 'cambiada']], $sugs[0]['propuesta'], 'los datos sí se actualizan');
         self::assertSame('Por PATCH', $sugs[1]['motivo']);
+        self::assertSame('aceptada', $sugs[1]['estado'], 'sin cambio de datos la decisión se conserva');
     }
 
     public function test_re_guardar_elimina_sugerencias_que_ya_no_vienen(): void
@@ -506,7 +508,7 @@ final class LaboratorioTest extends TestCase
         self::assertSame(["$autor:f1-p1:a"], array_column($this->copia($c, $cap)['sugerencias'], 'id'));
 
         // Comentarios: bloqueId conserva mayúsculas.
-        self::assertSame(201, $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'B1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'x'])->estado);
+        self::assertSame(201, $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'B1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'x', 'versionId' => $ver])->estado);
         self::assertSame(1, (int) self::$bd->query("SELECT COUNT(*) FROM comentarios WHERE bloque_id = 'B1'")->fetchColumn());
         self::assertSame(0, (int) self::$bd->query("SELECT COUNT(*) FROM comentarios WHERE bloque_id = 'b1'")->fetchColumn());
     }
@@ -531,11 +533,11 @@ final class LaboratorioTest extends TestCase
 
     public function test_crear_editar_borrar_comentario_propio(): void
     {
-        [$cap] = $this->escenario();
+        [$cap, $ver] = $this->escenario();
         [$c, $u] = $this->lab();
         [$otro] = $this->lab();
 
-        $r = $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 2, 'hasta' => 7], 'texto' => 'Revisar unidades', 'usuario_id' => 999, 'estado' => 'resuelto']);
+        $r = $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 2, 'hasta' => 7], 'texto' => 'Revisar unidades', 'versionId' => $ver, 'usuario_id' => 999, 'estado' => 'resuelto']);
         self::assertSame(201, $r->estado, $r->cuerpo());
         $id = $r->datos['id'];
         self::assertIsInt($id);
@@ -563,9 +565,9 @@ final class LaboratorioTest extends TestCase
 
     public function test_comentario_valida_texto_y_rango(): void
     {
-        [$cap] = $this->escenario();
+        [$cap, $ver] = $this->escenario();
         [$c] = $this->lab();
-        $bueno = ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'ok'];
+        $bueno = ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'ok', 'versionId' => $ver];
         $casos = [
             'texto' => [['texto' => ''], ['texto' => str_repeat('a', 4001)], ['texto' => 5]],
             'rango' => [['rango' => ['desde' => 3, 'hasta' => 1]], ['rango' => ['desde' => -1, 'hasta' => 1]], ['rango' => ['desde' => 0, 'hasta' => 10_000_001]], ['rango' => [0, 1]], ['rango' => 'x'], ['rango' => ['desde' => 0]]],
@@ -620,12 +622,12 @@ final class LaboratorioTest extends TestCase
         $r = $this->guardar($c, $cap, $ver, [$this->sug($autor, 'a')]);
         self::assertSame(409, $r->estado);
         self::assertSame('etapa_no_permite', $r->datos['error']['codigo']);
-        self::assertSame(409, $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'b', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'x'])->estado);
+        self::assertSame(409, $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'b', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'x', 'versionId' => $ver])->estado);
 
         // Consulta abierta y luego cerrada.
         $this->abrirConsulta($admin);
         self::assertSame(200, $this->guardar($c, $cap, $ver, [$this->sug($autor, 'a')])->estado);
-        $id = $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'b', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'x'])->datos['id'];
+        $id = $c->post("/capitulos/$cap/comentarios", ['bloqueId' => 'b', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'x', 'versionId' => $ver])->datos['id'];
         $this->reloj->avanzar(11 * 86400);
         $c = $this->cliente($u); // la sesión venció por inactividad
 

@@ -29,8 +29,8 @@ Este documento es el contrato entre el servidor PHP (`servidor/`) y el cliente (
 | 404 | `no_encontrado` | la ruta no existe, el recurso no existe **o es de otro laboratorio** (no se distingue), o un `{id}`/`{uid}` con formato inválido |
 | 405 | `metodo_no_permitido` | la ruta existe con otro método (con cabecera `Allow`). No hay CORS: `OPTIONS` sobre una ruta existente da 405, y sobre una inexistente, 404. Un preflight de otro sitio (`Origin` ajeno o `Sec-Fetch-Site: cross-site`) da antes 403 `origen_invalido`, porque esa comprobación va antes del enrutado (§1.2) |
 | 409 | `etapa_no_permite` | escritura fuera de su etapa (ver §3) |
-| 409 | `version_obsoleta` | `PUT …/copia` con un `versionId` que ya no es la base vigente |
-| 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida o borrado de capítulo, guardado de copia), o un borrado de capítulo que la base rechaza por un aporte recién creado. Se puede reintentar |
+| 409 | `version_obsoleta` | `PUT …/copia` o `POST …/comentarios` con un `versionId` que ya no es la base vigente (p. ej. el admin reemplazó el texto del capítulo durante la consulta) |
+| 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida o borrado de capítulo, guardado de copia o comentario mientras se reemplaza el capítulo), o un borrado de capítulo que la base rechaza por un aporte recién creado. Se puede reintentar |
 | 409 | `operacion_no_permitida` | un admin intenta desactivarse o quitarse el rol `admin` a sí mismo, o borrar un capítulo que ya tiene aportes, o reemplazar el texto de un capítulo que ya tiene aportes (§4.6) |
 | 413 | `cuerpo_muy_grande` | el cuerpo supera el tope de la ruta (§1.4) |
 | 415 | `tipo_no_soportado` | hay cuerpo y `Content-Type` no es `application/json` |
@@ -145,8 +145,13 @@ Se calculan por fecha en cada petición, con la fila única de `consulta`:
 | `PATCH /sugerencias/{id}`, `PATCH /comentarios/{id}/resolucion`, `PUT …/final` | edicion_final |
 
 - Fuera de su etapa, una escritura responde 409 `etapa_no_permite` y no cambia nada.
-- El admin puede mover las fechas en cualquier momento (abrir ahora, cerrar ahora, reabrir, volver a preparación; §4.6). La etapa se recalcula en la petición siguiente. Reabrir después de que el revisor decidió no borra sus decisiones, pero si un laboratorio vuelve a modificar una propuesta ya decidida, esa decisión puede perderse: el re-guardado de la copia borra las sugerencias que ya no vienen (con su `estado`) y conserva el `estado` de las que siguen con el mismo `uid`. Volver a preparación conserva todo el trabajo; solo impide editar hasta que se vuelva a abrir.
-- Las etapas de laboratorio y revisor no se solapan. Por eso un re-guardado de la copia conserva el `estado` de cada sugerencia sin riesgo de pisar una resolución.
+- El admin puede mover las fechas en cualquier momento (abrir ahora, cerrar ahora, reabrir, volver a preparación; §4.6). La etapa se recalcula en la petición siguiente. Volver a preparación conserva todo el trabajo; solo impide editar hasta que se vuelva a abrir.
+- Las etapas de laboratorio y revisor no se solapan, pero el admin puede **reabrir** la consulta después de que el revisor decidió. El `uid` de una sugerencia es un hash de su contenido (`idSugerencia`, `cliente/src/cambios/identidad.ts`: tipo, original, propuesta, grupo y lugar de una inserción). Por eso, al re-guardar la copia (§4.3):
+  - una sugerencia que vuelve con el mismo `uid` **conserva su decisión**, aunque cambien sus posiciones (`copia`, `base`, `orden`), por ejemplo si el laboratorio escribió antes en el mismo bloque;
+  - si el laboratorio **cambia la propuesta**, llega con otro `uid`: la anterior se borra junto con su decisión y la nueva entra `pendiente`;
+  - por defensa, si un cliente reutilizara un `uid` con otro contenido (comparado con los mismos campos del hash, sin las posiciones), la sugerencia vuelve a `pendiente` y se limpian `notaResolucion`, `derivadaReunion` y quién y cuándo resolvió.
+
+  Así ningún contenido que el revisor no decidió entra a la versión final como aceptado.
 - Las lecturas valen en cualquier etapa, salvo `GET …/aportes` (consulta y edicion_final) y `GET …/mis-aportes` (solo edicion_final).
 
 Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o recurso (404) y entrada (400/422). En `PATCH /comentarios/{id}` y en las resoluciones la entrada se valida antes de buscar el id (rol, etapa, 400, 404). La validación no depende del id, así que eso no revela nada.
@@ -207,7 +212,9 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 
 - `decisionesTomadas`: sugerencias con `estado` distinto de `pendiente` (de todos los capítulos).
 - `aportes`: sugerencias más comentarios (de todos los capítulos).
+- `versionesFinal`: versiones finales guardadas por el revisor (de todos los capítulos). El cliente lo usa para advertir al reabrir.
 - `reinicioPermitido`: `true` solo si el `.env` tiene `REINICIO_PRUEBAS=1` (ver `POST /admin/reiniciar`, §4.6).
+- `ahora`: la hora del servidor (ISO en UTC). Las acciones rápidas del cliente («Abrir ahora», «Cerrar ahora»…) calculan con ella y no con el reloj del navegador.
 
 Laboratorios y revisores nunca reciben estos campos.
 
@@ -251,7 +258,8 @@ Laboratorios y revisores nunca reciben estos campos.
 
 - Responde 200 `{"actualizado": "…Z"}`.
 - Reemplaza la copia y **todo** el conjunto de sugerencias propias del capítulo en una sola transacción: las que no vienen se borran.
-- Para las sugerencias que ya existían (mismo `uid`, con distinción de mayúsculas), se conservan su `motivo` y su `estado`.
+- Para las sugerencias que ya existían (mismo `uid`, con distinción de mayúsculas), se conserva su `motivo`. Su decisión (`estado`, nota, derivada, quién y cuándo resolvió) se conserva aunque cambien las posiciones (`copia`, `base`, `orden`); solo si cambiara el contenido que forma el `uid` vuelve a `pendiente` y se limpia (§3).
+- La versión base se comprueba dos veces: antes de validar el cuerpo y, de nuevo, dentro de la transacción, con la fila del capítulo bloqueada en modo compartido (`LOCK IN SHARE MODE`). El reemplazo y el borrado de capítulos toman esa misma fila con `FOR UPDATE` antes de comprobar los aportes, así que los dos caminos se serializan: si el admin reemplazó el texto entre medio, el guardado da 409 `version_obsoleta`, y si el reemplazo está en curso, el guardado espera (con la espera agotada, 409 `conflicto_concurrente`). Nunca queda una copia sobre una versión reemplazada.
 - Las sugerencias nuevas toman el `motivo` del cuerpo, si viene.
 - Campos de la sugerencia:
   - obligatorios: `id`, `bloqueId`, `base`, `copia`, `original`, `propuesta` y `tipo` ∈ `contenido`, `formato`, `bloque-insertado`, `bloque-eliminado`, además de `autor`;
@@ -272,8 +280,10 @@ Laboratorios y revisores nunca reciben estos campos.
 ### 4.4 Comentarios del laboratorio
 
 - **`GET /capitulos/{id}/comentarios`** devuelve `[{"id": 5, "bloqueId": "f1-p1", "rango": {"desde": 0, "hasta": 2}, "texto": "…", "estado": "abierto", "creado": "…Z"}]`, solo los propios, en orden de `id`.
-- **`POST /capitulos/{id}/comentarios`** con `{"bloqueId": "f1-p1", "rango": {"desde": 0, "hasta": 2}, "texto": "…"}` responde 201 `{"id": 5}`.
-- **`PATCH /comentarios/{id}`** con `{"texto": "…"}` responde 200 `{"id": 5}`. Solo el texto es editable.
+- **`POST /capitulos/{id}/comentarios`** con `{"bloqueId": "f1-p1", "rango": {"desde": 0, "hasta": 2}, "texto": "…", "versionId": 7}` responde 201 `{"id": 5}`.
+  - `versionId` (obligatorio, entero) es la versión base sobre la que se comenta, la de `GET …/base`. Si ya no es la vigente (el admin reemplazó el texto), responde 409 `version_obsoleta` y no crea nada; el cliente pasa a solo lectura y deja el texto en el campo para copiarlo, igual que con la copia.
+  - Se comprueba también dentro de la transacción, con el capítulo bloqueado en modo compartido, como en `PUT …/copia` (§4.3). Un reemplazo en curso hace esperar; con la espera agotada, 409 `conflicto_concurrente`.
+- **`PATCH /comentarios/{id}`** con `{"texto": "…"}` responde 200 `{"id": 5}`. Solo el texto es editable. No lleva `versionId`: si el comentario existe, el capítulo tiene aportes y su texto ya no se puede reemplazar.
 - **`DELETE /comentarios/{id}`** responde 204.
 - Un comentario ajeno o inexistente da 404. Los campos extra (`usuario_id`, `estado`, `resuelto_por`, …) se ignoran.
 
@@ -329,7 +339,7 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - **Un capítulo nuevo (slug nuevo) se sube en cualquier etapa.** Durante la consulta queda disponible para los laboratorios apenas se sube.
 - Responde 201 `{"id": 3, "versionId": 7}`.
 - **Reemplazar el texto** (slug existente): actualiza `titulo` y `orden` y crea una nueva versión base, en cualquier etapa, **solo si el capítulo no tiene aportes** (las mismas condiciones que el borrado, abajo). Si los tiene, responde 409 `operacion_no_permitida` y no cambia nada. El mensaje dice cuántos laboratorios (usuarios distintos con copias, instantáneas, sugerencias o comentarios en el capítulo) trabajaron en él: «2 laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto.». Si el único aporte es una versión final: «El capítulo ya tiene una versión final; no se puede reemplazar el texto.». La comprobación se hace con la fila del capítulo bloqueada (`FOR UPDATE`), como en el borrado.
-- Dos subidas simultáneas del mismo slug pueden dar 409 `conflicto_concurrente`.
+- Dos subidas simultáneas del mismo slug, o una espera de bloqueo agotada (un guardado de laboratorio en curso sobre el capítulo), dan 409 `conflicto_concurrente`.
 
 **`PATCH /admin/capitulos/{id}`** con `{"orden"?: 3, "titulo"?: "…"}`:
 - Cambia la numeración y/o el título en **cualquier etapa**: son solo presentación y no crean una versión nueva.
@@ -382,7 +392,7 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - Responde 200 con el mismo cuerpo que `GET /consulta` para el admin (incluye `decisionesTomadas`, `aportes` y `reinicioPermitido`).
 
 **`POST /admin/reiniciar`** con `{"confirmacion": "REINICIAR"}` («Reiniciar datos de prueba»):
-- **Solo existe si el `.env` tiene `REINICIO_PRUEBAS=1`** (exactamente `1`). Sin la variable, o con otro valor, la ruta no se registra y responde 404 `no_encontrado` como cualquier ruta inexistente; además `GET /consulta` da `reinicioPermitido: false` y el cliente oculta la sección. **Hay que quitarla o dejarla en `0` antes de la consulta real** (`docs/despliegue.md` §5.3).
+- **Solo existe si el `.env` tiene `REINICIO_PRUEBAS=1`**: el valor, sin los espacios de alrededor y sin comillas, tiene que ser `1`. Sin la variable, o con otro valor (`0`, `si`, `01`…), la ruta no se registra y responde 404 `no_encontrado` como cualquier ruta inexistente; además `GET /consulta` da `reinicioPermitido: false` y el cliente oculta la sección. **Hay que quitarla o dejarla en `0` antes de la consulta real** (`docs/despliegue.md` §5.3).
 - Rol admin; CSRF y JSON como el resto. Cualquier `confirmacion` distinta de `"REINICIAR"` exacto da 400 en `confirmacion` y no toca nada.
 - Pasos, en orden:
   1. **Respaldo** completo de la base con `Mantenimiento\Respaldo` en `var/respaldos/` (mismo formato y rotación que el respaldo diario del cron, §6). Si falla, responde 500 `respaldo_fallido` («No se pudo crear el respaldo de la base; no se borró nada.») y **no se borra nada**.

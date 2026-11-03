@@ -64,7 +64,12 @@ final class Sugerencias
     /**
      * Reemplaza el conjunto de sugerencias propias del capítulo. Debe llamarse dentro de una transacción
      * (la abre Copias::guardar). Borra las que no vienen (y las de otras versiones base), actualiza los
-     * datos de las que siguen conservando `motivo` y `estado`, e inserta las nuevas con su `motivo`.
+     * datos de las que siguen conservando `motivo`, e inserta las nuevas con su `motivo`.
+     * Una que sigue con el mismo contenido conserva su decisión (`estado`, nota, derivada, resuelto_*), aunque
+     * cambien sus posiciones (`copia`, `base`, `orden`): el laboratorio pudo escribir antes en el mismo bloque.
+     * El contenido se compara con huellaContenido(), los mismos campos que forman el uid en el cliente. Como el uid
+     * es un hash de ellos, con el mismo uid no deberían cambiar nunca; si un cliente lo hiciera, la sugerencia
+     * vuelve a `pendiente` y se limpia la decisión, para que un contenido que el revisor no vio no entre como aceptado.
      *
      * @param list<array{uid:string,bloqueId:string,tipo:string,grupo:?string,datos:string,motivo:?string}> $nuevas
      */
@@ -73,13 +78,15 @@ final class Sugerencias
         if (!$this->bd->inTransaction()) {
             throw new \LogicException('Sugerencias::reemplazar exige una transacción abierta.');
         }
-        $st = $this->bd->prepare('SELECT id, uid, version_base_id FROM sugerencias WHERE usuario_id = ? AND capitulo_id = ? FOR UPDATE');
+        $st = $this->bd->prepare('SELECT id, uid, version_base_id, datos FROM sugerencias WHERE usuario_id = ? AND capitulo_id = ? FOR UPDATE');
         $st->execute([$usuarioId, $capituloId]);
         $existentes = [];
+        $datosPrevios = [];
         $borrar = [];
         foreach ($st->fetchAll() as $f) {
             if ((int) $f['version_base_id'] === $versionBaseId) {
                 $existentes[$f['uid']] = (int) $f['id'];
+                $datosPrevios[$f['uid']] = self::huellaContenido($f['datos']);
             } else {
                 $borrar[] = (int) $f['id'];
             }
@@ -96,6 +103,11 @@ final class Sugerencias
         }
 
         $actualizar = $this->bd->prepare('UPDATE sugerencias SET bloque_id = ?, tipo = ?, grupo = ?, datos = ? WHERE usuario_id = ? AND id = ?');
+        $reabrir = $this->bd->prepare(
+            "UPDATE sugerencias SET bloque_id = ?, tipo = ?, grupo = ?, datos = ?, estado = 'pendiente', nota_resolucion = NULL,
+                    derivada_reunion = 0, resuelto_por = NULL, resuelto_en = NULL
+             WHERE usuario_id = ? AND id = ?"
+        );
         $insertar = $this->bd->prepare(
             'INSERT INTO sugerencias (usuario_id, capitulo_id, version_base_id, uid, bloque_id, tipo, grupo, datos, motivo, creado)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -103,11 +115,33 @@ final class Sugerencias
         $creado = $ahora->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
         foreach ($nuevas as $s) {
             if (isset($existentes[$s['uid']])) {
-                $actualizar->execute([$s['bloqueId'], $s['tipo'], $s['grupo'], $s['datos'], $usuarioId, $existentes[$s['uid']]]);
+                $cambio = $datosPrevios[$s['uid']] === self::huellaContenido($s['datos']) ? $actualizar : $reabrir;
+                $cambio->execute([$s['bloqueId'], $s['tipo'], $s['grupo'], $s['datos'], $usuarioId, $existentes[$s['uid']]]);
             } else {
                 $insertar->execute([$usuarioId, $capituloId, $versionBaseId, $s['uid'], $s['bloqueId'], $s['tipo'], $s['grupo'], $s['datos'], $s['motivo'], $creado]);
             }
         }
+    }
+
+    /**
+     * Huella del contenido de una sugerencia: exactamente los campos que alimentan el uid en el cliente
+     * (`idSugerencia` en cliente/src/cambios/identidad.ts: tipo, original, propuesta, grupo y el lugar de una
+     * inserción, profundidad, primerHijo y siguiente), más el bloque. Quedan fuera los campos posicionales
+     * (`copia`, `base`, `orden`) y los derivados (`id`, `autor`), que pueden cambiar sin cambiar la propuesta.
+     */
+    public static function huellaContenido(string $datos): string
+    {
+        $d = json_decode($datos, true, 512, JSON_THROW_ON_ERROR);
+        return json_encode([
+            $d['bloqueId'] ?? null,
+            $d['tipo'] ?? null,
+            $d['original'] ?? null,
+            $d['propuesta'] ?? null,
+            $d['grupo'] ?? null,
+            $d['profundidad'] ?? null,
+            $d['primerHijo'] ?? false,
+            $d['siguiente'] ?? null,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 
     /**

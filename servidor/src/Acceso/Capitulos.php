@@ -152,6 +152,29 @@ final class Capitulos
         return (int) $st->fetchColumn();
     }
 
+    /**
+     * Dentro de la transacción de un guardado de laboratorio (copia o comentario): bloquea en modo compartido la
+     * fila del capítulo y vuelve a leer la versión base vigente. El reemplazo y el borrado toman la misma fila con
+     * FOR UPDATE antes de tocar las versiones, así que ambos caminos se serializan: o el guardado ve la versión
+     * nueva, o el reemplazo espera a que el guardado confirme (y entonces ve su aporte).
+     * @throws VersionObsoleta si $versionBaseId ya no es la vigente (o el capítulo ya no existe)
+     */
+    public static function exigirVersionVigente(\PDO $bd, int $capituloId, int $versionBaseId): void
+    {
+        if (!$bd->inTransaction()) {
+            throw new \LogicException('Capitulos::exigirVersionVigente exige una transacción abierta.');
+        }
+        $st = $bd->prepare('SELECT id FROM capitulos WHERE id = ? LOCK IN SHARE MODE');
+        $st->execute([$capituloId]);
+        $st->fetchAll();
+        $st = $bd->prepare("SELECT MAX(id) FROM versiones_capitulo WHERE capitulo_id = ? AND tipo = 'base'");
+        $st->execute([$capituloId]);
+        $vigente = $st->fetchColumn();
+        if ($vigente === false || $vigente === null || (int) $vigente !== $versionBaseId) {
+            throw new VersionObsoleta('La versión base cambió.');
+        }
+    }
+
     /** Id de la versión base vigente (la última de tipo `base`), o null si el capítulo no existe. */
     public function versionBaseVigente(int $capituloId): ?int
     {

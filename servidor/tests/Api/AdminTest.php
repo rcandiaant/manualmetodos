@@ -623,7 +623,11 @@ final class AdminTest extends TestCase
         $g = $c->get('/consulta')->datos;
         self::assertSame(3, $g['decisionesTomadas']);
         self::assertSame(6, $g['aportes']);
-        self::assertSame(['apertura', 'cierre', 'etapa', 'motivoObligatorio', 'decisionesTomadas', 'aportes', 'reinicioPermitido'], array_keys($g));
+        self::assertSame(['apertura', 'cierre', 'etapa', 'motivoObligatorio', 'decisionesTomadas', 'aportes', 'versionesFinal', 'reinicioPermitido', 'ahora'], array_keys($g));
+        self::assertSame(0, $g['versionesFinal']);
+        self::assertSame('2026-11-02T12:00:00Z', $g['ahora'], 'hora del servidor, para que las acciones rápidas no dependan del reloj del navegador');
+        self::$bd->exec("INSERT INTO versiones_capitulo (capitulo_id, tipo, doc_json, tex_final) VALUES ($cap, 'final', '{}', 'x'), ($cap, 'final', '{}', 'y')");
+        self::assertSame(2, $c->get('/consulta')->datos['versionesFinal']);
 
         // Laboratorio y revisor no ven los campos de admin.
         foreach ([$lab, $revisor] as $u) {

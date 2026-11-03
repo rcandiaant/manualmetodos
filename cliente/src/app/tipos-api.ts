@@ -63,8 +63,12 @@ export interface Consulta {
   decisionesTomadas?: number;
   /** Solo para el admin: sugerencias + comentarios. */
   aportes?: number;
+  /** Solo para el admin: versiones finales guardadas por el revisor. */
+  versionesFinal?: number;
   /** Solo para el admin: «Reiniciar datos de prueba» habilitado (REINICIO_PRUEBAS=1). */
   reinicioPermitido?: boolean;
+  /** Solo para el admin: hora del servidor (las acciones rápidas la usan en vez del reloj del navegador). */
+  ahora?: FechaIso;
 }
 
 /**
@@ -177,6 +181,8 @@ export interface ComentarioEntrada {
   bloqueId: string;
   rango: Rango;
   texto: string;
+  /** Versión base sobre la que se comenta: si el admin ya la reemplazó, 409 `version_obsoleta`. */
+  versionId: number;
 }
 
 export interface IdCreado<T = number> {

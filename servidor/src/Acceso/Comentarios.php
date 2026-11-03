@@ -41,17 +41,32 @@ final class Comentarios
         return $res;
     }
 
-    /** @param array{desde:int,hasta:int} $rango */
-    public function crear(int $usuarioId, int $capituloId, string $bloqueId, array $rango, string $texto, \DateTimeImmutable $ahora): int
+    /**
+     * Crea el comentario anclado a la versión base $versionBaseId, en una transacción que primero comprueba,
+     * con el capítulo bloqueado, que esa versión sigue vigente (si no, VersionObsoleta y no se inserta nada).
+     * @param array{desde:int,hasta:int} $rango
+     */
+    public function crear(int $usuarioId, int $capituloId, int $versionBaseId, string $bloqueId, array $rango, string $texto, \DateTimeImmutable $ahora): int
     {
-        $this->bd->prepare('INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto, creado) VALUES (?, ?, ?, ?, ?, ?)')
-            ->execute([
-                $usuarioId, $capituloId, $bloqueId,
-                json_encode(['desde' => $rango['desde'], 'hasta' => $rango['hasta']], JSON_THROW_ON_ERROR),
-                $texto,
-                $ahora->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
-            ]);
-        return (int) $this->bd->lastInsertId();
+        $this->bd->beginTransaction();
+        try {
+            Capitulos::exigirVersionVigente($this->bd, $capituloId, $versionBaseId);
+            $this->bd->prepare('INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto, creado) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([
+                    $usuarioId, $capituloId, $bloqueId,
+                    json_encode(['desde' => $rango['desde'], 'hasta' => $rango['hasta']], JSON_THROW_ON_ERROR),
+                    $texto,
+                    $ahora->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+                ]);
+            $id = (int) $this->bd->lastInsertId();
+            $this->bd->commit();
+        } catch (\Throwable $e) {
+            if ($this->bd->inTransaction()) {
+                $this->bd->rollBack();
+            }
+            throw $e;
+        }
+        return $id;
     }
 
     /** false si no existe o no es propio. */

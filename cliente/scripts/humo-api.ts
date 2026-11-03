@@ -426,17 +426,20 @@ async function main(): Promise<void> {
 
   paso('6. Los laboratorios comentan');
   await labs[1].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+    versionId: base.versionId,
     bloqueId: 'b2',
     rango: { desde: 0, hasta: 4 },
     texto: 'Proponemos «partido»; conversarlo en la reunión.',
   });
   const c2 = await labs[2].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+    versionId: base.versionId,
     bloqueId: 'b7',
     rango: { desde: 0, hasta: 9 },
     texto: 'Borrador de comentario.',
   });
   await labs[2].api.patch(`/comentarios/${c2.id}`, { texto: '¿Cuántas repeticiones se registran?' });
   const c3 = await labs[2].api.post<IdCreado>(`/capitulos/${cap.id}/comentarios`, {
+    versionId: base.versionId,
     bloqueId: 'b8',
     rango: { desde: 0, hasta: 7 },
     texto: 'Comentario que se borrará.',

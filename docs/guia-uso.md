@@ -122,6 +122,7 @@ El **registro de cambios** reúne en una sola tabla todos los aportes de los lab
 
 - **Un capítulo nuevo se puede subir en cualquier etapa.** Si la consulta ya está abierta, los laboratorios lo ven de inmediato.
 - **Reemplazar el texto de un capítulo:** súbalo de nuevo con el mismo identificador. El formulario lo avisa («la subida reemplazará el texto de "…"») y el botón dice **Subir y reemplazar**. Solo es posible mientras **ningún laboratorio haya trabajado en él** (copias, propuestas o comentarios) y no tenga versión final. Si ya trabajaron, la plataforma lo impide y dice cuántos laboratorios: «2 laboratorios ya trabajaron en este capítulo; no se puede reemplazar el texto». En ese caso corrija el texto en la edición final, o suba el capítulo corregido con otro identificador.
+- Si reemplaza el texto con la consulta abierta, un laboratorio que tenía el capítulo abierto en la versión anterior verá su página pasar a solo lectura al intentar guardar o comentar, con el texto no enviado listo para copiar; al recargar trabaja sobre la versión nueva.
 - En la lista **Capítulos subidos** puede cambiar el orden y el título en cualquier momento.
 - **Borrar** un capítulo se puede en cualquier etapa, pero solo si no tiene aportes. La plataforma pide confirmar en la misma página.
 
@@ -145,8 +146,10 @@ Arriba se ve, destacada, la **etapa actual** (Preparación, Consulta abierta o E
 | **Abrir ahora** | en preparación | La apertura pasa a ser este momento. Si no había cierre, o ya pasó, el cierre queda en 7 días. |
 | **Cerrar ahora** | con la consulta abierta | El cierre pasa a ser este momento. Los laboratorios ya no podrán editar; el revisor podrá decidir. |
 | **Extender cierre +1 día** / **+1 semana** | con la consulta abierta | Suma un día o una semana al cierre. |
-| **Volver a abrir** | en edición final | El cierre queda en 7 días desde ahora. Si el revisor ya tomó decisiones, se avisa: si un laboratorio vuelve a modificar una propuesta ya decidida, esa decisión se pierde. |
+| **Volver a abrir** | en edición final | El cierre queda en 7 días desde ahora. Si el revisor ya tomó decisiones, se avisa: las propuestas que los laboratorios no cambien conservan su decisión (aunque escriban otra cosa en el mismo párrafo); si un laboratorio modifica una propuesta ya decidida, pasa a ser una propuesta **nueva** y llega **pendiente**, y el revisor tendrá que decidirla de nuevo. Si ya hay versiones finales guardadas, también se avisa: habrá que revisarlas y volver a guardarlas. |
 | **Volver a preparación** | si hay fechas | Quita las dos fechas. El trabajo de los laboratorios queda guardado, pero no podrán editar hasta que la consulta se vuelva a abrir. |
+
+Las acciones rápidas usan la hora del servidor, no la de su computador.
 
 **Fechas a mano.** También puede escribir la apertura y el cierre que quiera, en cualquier etapa e incluso en el pasado; el cierre debe ser posterior a la apertura. Si deja las dos vacías, la consulta vuelve a preparación. Si las fechas nuevas cambian la etapa, la plataforma pide confirmar. Cada cambio queda registrado en la auditoría con los valores de antes y de después.
 - **Motivo obligatorio** pide a los laboratorios un motivo para cada cambio. Se puede cambiar en cualquier momento y nunca impide guardar.
@@ -160,5 +163,8 @@ Al pie de la página **Consulta** aparece la **Zona de pruebas**, pero **solo si
 - Antes de borrar, el servidor guarda un **respaldo completo** de la base en `var/respaldos`. Si el respaldo falla, no se borra nada.
 
 Para usarla, escriba `REINICIAR` (en mayúsculas) en el cuadro y pulse **Reiniciar datos de prueba**. Al terminar verá el nombre del respaldo y cuántas filas se borraron de cada tipo.
+
+- Úsela con los laboratorios sin trabajar, o después de **Cerrar ahora**: lo que alguien guarde mientras se hace el respaldo podría no quedar en él.
+- Los navegadores de los laboratorios pueden guardar borradores no enviados. Después de reiniciar, pídales recargar la página y, si se les ofrece recuperar un borrador antiguo, descartarlo.
 
 **Antes de la consulta real, el equipo técnico debe deshabilitarla.** Si la Zona de pruebas todavía aparece cuando la consulta real va a empezar, avíseles.

@@ -57,19 +57,23 @@ final class Consulta
 
     /**
      * dto() más los datos que solo ve el admin (docs/api.md §4.1): sugerencias ya decididas por el revisor,
-     * total de aportes (sugerencias + comentarios) y si «Reiniciar datos de prueba» está habilitado.
-     * @return array{apertura:?string,cierre:?string,etapa:string,motivoObligatorio:bool,decisionesTomadas:int,aportes:int,reinicioPermitido:bool}
+     * total de aportes (sugerencias + comentarios), versiones finales guardadas, si «Reiniciar datos de prueba» está
+     * habilitado y la hora del servidor (`ahora`), para que las acciones rápidas no dependan del reloj del navegador.
+     * @return array{apertura:?string,cierre:?string,etapa:string,motivoObligatorio:bool,decisionesTomadas:int,aportes:int,versionesFinal:int,reinicioPermitido:bool,ahora:string}
      */
     public function dtoAdmin(bool $reinicioPermitido): array
     {
         $f = $this->bd->query(
             "SELECT (SELECT COUNT(*) FROM sugerencias WHERE estado <> 'pendiente') AS decisiones,"
-            . ' (SELECT COUNT(*) FROM sugerencias) + (SELECT COUNT(*) FROM comentarios) AS aportes'
+            . ' (SELECT COUNT(*) FROM sugerencias) + (SELECT COUNT(*) FROM comentarios) AS aportes,'
+            . " (SELECT COUNT(*) FROM versiones_capitulo WHERE tipo = 'final') AS finales"
         )->fetch();
         return $this->dto() + [
             'decisionesTomadas' => (int) $f['decisiones'],
             'aportes' => (int) $f['aportes'],
+            'versionesFinal' => (int) $f['finales'],
             'reinicioPermitido' => $reinicioPermitido,
+            'ahora' => self::iso($this->reloj->ahora()),
         ];
     }
 

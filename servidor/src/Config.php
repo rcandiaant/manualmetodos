@@ -68,8 +68,8 @@ final class Config
             $indice,
             ($v['COOKIE_SEGURA'] ?? '0') === '1',
             ($v['ZONA_HORARIA'] ?? '') !== '' ? $v['ZONA_HORARIA'] : 'America/Santiago',
-            // Cierra por defecto: solo el valor exacto «1» lo habilita.
-            ($v['REINICIO_PRUEBAS'] ?? '0') === '1',
+            // Cierra por defecto: solo el valor «1» (sin espacios alrededor; el .env ya quita las comillas) lo habilita.
+            trim($v['REINICIO_PRUEBAS'] ?? '0') === '1',
         );
     }
 

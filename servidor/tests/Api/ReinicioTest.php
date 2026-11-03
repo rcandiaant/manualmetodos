@@ -164,7 +164,7 @@ final class ReinicioTest extends TestCase
 
     public function test_sin_la_bandera_la_ruta_no_existe(): void
     {
-        foreach ([null, '0', '', 'si', 'true', '1 '] as $valor) {
+        foreach ([null, '0', '', 'si', 'true', '01'] as $valor) {
             $this->bandera = $valor;
             $this->montar();
             $antes = $this->conteos();
@@ -175,6 +175,28 @@ final class ReinicioTest extends TestCase
             self::assertSame($antes, $this->conteos());
         }
         self::assertSame([], $this->respaldos());
+    }
+
+    public function test_si_falla_el_borrado_a_mitad_se_deshace_todo(): void
+    {
+        $this->montar();
+        $antes = $this->conteos();
+        $consulta = self::$bd->query('SELECT apertura, cierre FROM consulta')->fetch(\PDO::FETCH_NUM);
+        // Comentarios y sugerencias ya se borraron cuando falla el DELETE de copias_laboratorio.
+        self::$bd->exec("CREATE TRIGGER tg_falla_reinicio BEFORE DELETE ON copias_laboratorio FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'falla simulada'");
+        try {
+            $r = $this->admin->post('/admin/reiniciar', ['confirmacion' => 'REINICIAR']);
+        } finally {
+            self::$bd->exec('DROP TRIGGER IF EXISTS tg_falla_reinicio');
+        }
+        self::assertSame(500, $r->estado, $r->cuerpo());
+        self::assertSame('error_interno', $r->datos['error']['codigo']);
+        $despues = $this->conteos();
+        unset($antes['auditoria'], $despues['auditoria']); // el respaldo sí alcanzó a escribirse (y a auditarse)
+        self::assertSame($antes, $despues);
+        self::assertSame($consulta, self::$bd->query('SELECT apertura, cierre FROM consulta')->fetch(\PDO::FETCH_NUM));
+        self::assertCount(0, $this->auditoria('reiniciar_pruebas'));
+        self::assertCount(1, $this->respaldos(), 'el respaldo previo queda disponible');
     }
 
     public function test_si_falla_el_respaldo_da_500_y_no_borra_nada(): void

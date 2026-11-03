@@ -8,6 +8,7 @@ use Manual\Acceso\Capitulos;
 use Manual\Acceso\Consulta;
 use Manual\Acceso\Copias;
 use Manual\Acceso\Sugerencias;
+use Manual\Acceso\VersionObsoleta;
 use Manual\Dominio\Etapa;
 use Manual\Dominio\Rol;
 use Manual\Http\ErrorHttp;
@@ -81,11 +82,15 @@ final class CopiaCtl
         try {
             // Se guarda lo validado, recodificado: nunca el cuerpo crudo.
             $this->copias->guardar($u['id'], $cap['id'], $versionId, json_encode($doc, self::JSON), $sugerencias, $ahora);
+        } catch (VersionObsoleta) {
+            // El admin reemplazó el texto entre la comprobación de arriba y la transacción.
+            throw new ErrorHttp(409, 'version_obsoleta', 'La versión base cambió: recargue el capítulo.');
         } catch (\PDOException $e) {
-            // Dos guardados simultáneos del mismo laboratorio (p. ej. dos pestañas): interbloqueo (1213) o
-            // espera de bloqueo agotada (1205). Cualquier otro error (FK, clave duplicada) es un 500 real.
+            // Dos guardados simultáneos del mismo laboratorio (p. ej. dos pestañas), o un reemplazo del capítulo en
+            // curso: interbloqueo (1213) o espera de bloqueo agotada (1205). Cualquier otro error (FK, clave
+            // duplicada) es un 500 real.
             if (in_array($e->errorInfo[1] ?? null, [1213, 1205], true)) {
-                throw new ErrorHttp(409, 'conflicto_concurrente', 'Otro guardado de esta copia está en curso. Reintente.');
+                throw new ErrorHttp(409, 'conflicto_concurrente', 'Otro guardado de esta copia, o un cambio del capítulo, está en curso. Reintente.');
             }
             throw $e;
         }

@@ -49,7 +49,7 @@ final class EtapasTest extends TestCase
             ]),
             'copia' => $this->lab->put("/capitulos/{$this->cap}/copia", ['versionId' => $this->ver, 'docJson' => $this->docCopia(), 'sugerencias' => []]),
             'motivo' => $this->lab->patch("/capitulos/{$this->cap}/sugerencias/$uid", ['motivo' => 'porque sí']),
-            'comentar' => $this->lab->post("/capitulos/{$this->cap}/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'nuevo']),
+            'comentar' => $this->lab->post("/capitulos/{$this->cap}/comentarios", ['bloqueId' => 'f1-p1', 'rango' => ['desde' => 0, 'hasta' => 1], 'texto' => 'nuevo', 'versionId' => $this->ver]),
             'editar' => $this->lab->patch("/comentarios/{$this->comIds[0]}", ['texto' => 'editado']),
             'borrar' => $this->lab->delete("/comentarios/{$this->comIds[0]}"),
             'resolver' => $this->revisor->patch("/sugerencias/{$this->sugIds[0]}", ['estado' => 'aceptada']),

@@ -217,11 +217,33 @@ describe('admin: consulta — acciones rápidas', () => {
     expect(boton('Extender cierre +1 día')).toBeUndefined();
     boton('Volver a abrir')!.click();
     expect(confirmar()?.querySelector('.advertencia')?.textContent).toBe(
-      'Hay 3 decisiones tomadas por el revisor. Si un laboratorio vuelve a modificar una propuesta ya decidida, esa decisión se pierde.',
+      'Hay 3 decisiones tomadas por el revisor. Las propuestas que los laboratorios no cambien conservan su decisión. Si un laboratorio modifica una propuesta ya decidida, pasa a ser una propuesta nueva y llega pendiente: el revisor tendrá que decidirla de nuevo.',
     );
     boton('Confirmar', confirmar()!)!.click();
     await vista.listo;
     expect(cuerpo(1)).toEqual({ apertura: '2026-11-02T12:00:00Z', cierre: iso(AHORA + 7 * DIA), motivoObligatorio: false });
+  });
+
+  it('«Volver a abrir» con versiones finales guardadas lo advierte', async () => {
+    const { boton, confirmar } = await montar(base({ etapa: 'edicion_final', cierre: '2026-11-03T11:00:00Z', versionesFinal: 2 }));
+    boton('Volver a abrir')!.click();
+    const avisos = [...confirmar()!.querySelectorAll('.advertencia')].map((a) => a.textContent);
+    expect(avisos).toContain(
+      'Hay 2 versiones finales guardadas. Si los laboratorios cambian sus propuestas, el revisor tendrá que revisarlas y volver a guardar la versión final.',
+    );
+  });
+
+  it('las acciones rápidas usan la hora del servidor, no la del navegador', async () => {
+    // El navegador va 10 minutos atrasado respecto del servidor.
+    const servidor = AHORA + 10 * 60_000;
+    const { boton, vista, cuerpo, confirmar } = await montar(
+      base({ etapa: 'preparacion', apertura: null, cierre: null, ahora: iso(servidor) }),
+      json(200, base({ ahora: iso(servidor + 1000) })),
+    );
+    boton('Abrir ahora')!.click();
+    boton('Confirmar', confirmar()!)!.click();
+    await vista.listo;
+    expect(cuerpo(1)).toEqual({ apertura: iso(servidor), cierre: iso(servidor + 7 * DIA), motivoObligatorio: false });
   });
 
   it('«Volver a abrir» sin decisiones no muestra esa advertencia', async () => {

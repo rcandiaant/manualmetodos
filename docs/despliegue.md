@@ -33,6 +33,22 @@ Las dos partes deben tener el mismo nombre. **Si el nombre termina en `-sucio`, 
 
 Solo `public/` queda visible desde Internet. Todo lo demás, incluido el `.env` con las claves, queda un nivel más arriba, fuera del alcance de los visitantes.
 
+> **Variante con `index.php` puente** (así está instalada la plataforma en renalasch.cl). En ese hosting cPanel no aceptó una raíz web fuera de `public_html`, así que la raíz web del subdominio es `/home/renalasc/public_html/manual.renalasch.cl`. Ahí solo están el cliente (`index.html`, `assets/`), el `.htaccess` y un `index.php` puente que carga la API desde `/home/renalasc/manualmetodos/public/index.php`. El resto de la plataforma, el `.env` y `var/` siguen en `/home/renalasc/manualmetodos/`, fuera de `public_html`. Las secciones 1, 2, 10.1 y 10.2 tienen un recuadro para esta variante.
+>
+> ```
+> /home/renalasc/
+> ├── public_html/
+> │   └── manual.renalasch.cl/   (raíz web del subdominio)
+> │       ├── index.html  assets/  .htaccess   (del paquete, con la guardia de host)
+> │       ├── index.php                         (el puente; nunca se reemplaza)
+> │       └── .user.ini                         (límites de PHP, paso 6.1)
+> └── manualmetodos/
+>     ├── public/index.php   (la API de verdad; la carga el puente)
+>     ├── bin/  config/  migraciones/  src/  vendor/  composer.json
+>     ├── .env
+>     └── var/
+> ```
+
 ---
 
 ## 1. Crear el subdominio y activar HTTPS
@@ -43,6 +59,7 @@ Solo `public/` queda visible desde Internet. Todo lo demás, incluido el `.env` 
 4. En **Raíz del documento** (*Document Root*) escriba `/home/USUARIO/manualmetodos/public`. Es importante que termine en `/public`.
 5. Pulse **Enviar**. cPanel crea la carpeta vacía; los archivos llegan en el paso 2.
    - Si cPanel no acepta una raíz fuera de `public_html`, **no ponga la plataforma dentro de `public_html`**: el `.env` quedaría visible desde el sitio principal. Deténgase y consulte al equipo técnico. Para ese caso hay una variante en [`docs/api.md` §6](api.md#6-checklist-de-despliegue), punto «Qué se sube y dónde».
+   - **Variante con `index.php` puente** (la de renalasch.cl): si cPanel solo acepta raíces dentro de `public_html`, use `/home/renalasc/public_html/manual.renalasch.cl` como raíz del documento. La plataforma igual se instala en `/home/renalasc/manualmetodos/` (paso 2) y el `.env` queda fuera de `public_html`; en la raíz web solo van el cliente, el `.htaccess` y el puente.
 6. HTTPS:
    - En **SSL/TLS Status** confirme que `manual.renalasch.cl` tenga un certificado válido. Si no lo tiene, pulse **Run AutoSSL** y espere unos minutos.
    - De vuelta en **Dominios**, active **Force HTTPS Redirect** para `manual.renalasch.cl`.
@@ -58,6 +75,30 @@ Solo `public/` queda visible desde Internet. Todo lo demás, incluido el `.env` 
    - Si cPanel creó antes una carpeta `manualmetodos/public` vacía, no importa: la extracción la rellena.
 5. Revise que existan `manualmetodos/public/index.html`, `manualmetodos/public/.htaccess` y `manualmetodos/vendor/autoload.php`.
 6. Borre el `.zip` de `/home/USUARIO`. Ya no hace falta.
+
+> **Variante con `index.php` puente** (raíz web `/home/renalasc/public_html/manual.renalasch.cl`). Haga los puntos 1 a 5 igual: la plataforma completa queda en `/home/renalasc/manualmetodos/`. Después:
+>
+> 1. **Copie el cliente a la raíz web conservando las carpetas.** El Administrador de archivos no copia bien carpetas con subcarpetas una por una, así que se hace con un zip: entre a `/home/renalasc/manualmetodos/public`, seleccione `index.html`, `assets` y `.htaccess` → **Comprimir** (Zip) → nombre `cliente.zip`. Mueva `cliente.zip` a `/home/renalasc/public_html/manual.renalasch.cl` y ahí use **Extraer**. Borre `cliente.zip`. No copie `index.php`.
+> 2. **Cree el puente.** En `/home/renalasc/public_html/manual.renalasch.cl`, **+ Archivo** → `index.php` → **Editar**, con exactamente este contenido:
+>
+>    ```php
+>    <?php
+>    // Puente: la plataforma vive fuera de public_html. No reemplazar en las actualizaciones.
+>    require '/home/renalasc/manualmetodos/public/index.php';
+>    ```
+>
+>    El `index.php` de verdad sigue en `/home/renalasc/manualmetodos/public/` y busca `vendor/` y `.env` relativos a su propia carpeta, así que funciona igual cargado desde el puente.
+> 3. **Agregue la guardia de host.** La raíz web está dentro de `public_html`, así que el sitio principal también podría llegar a ella (por ejemplo `renalasch.cl/manual.renalasch.cl/`). Edite el `.htaccess` de `/home/renalasc/public_html/manual.renalasch.cl` y, **justo después de la línea `RewriteEngine On`**, agregue estas 3 líneas:
+>
+>    ```apache
+>    # Guardia de host: esta carpeta solo responde a manual.renalasch.cl
+>    RewriteCond %{HTTP_HOST} !^manual\.renalasch\.cl$ [NC]
+>    RewriteRule ^ - [F]
+>    ```
+>
+>    Cualquier visita que no sea a `manual.renalasch.cl` recibe 403.
+> 4. Los límites de PHP del paso 6.1 (`.user.ini`) se crean en `/home/renalasc/public_html/manual.renalasch.cl`, que es la raíz web.
+> 5. En la prueba rápida (paso 9), `https://manual.renalasch.cl/.env` y `/composer.json` responden **404** en vez de 403: esos archivos no están en la raíz web. Es correcto.
 
 ## 3. Crear la base de datos y su usuario
 
@@ -144,7 +185,7 @@ Mientras se prueba la plataforma con los laboratorios, el administrador puede ne
    REINICIO_PRUEBAS=1
    ```
 
-   Tiene que ser exactamente `1`. Cualquier otro valor, o la línea ausente, lo deja apagado.
+   El valor tiene que ser `1`; se ignoran los espacios alrededor y las comillas (`REINICIO_PRUEBAS="1"` también vale). Cualquier otro valor (`0`, `si`, `01`…), o la línea ausente, lo deja apagado.
 2. Guarde. No hace falta reiniciar nada: el cambio vale desde la petición siguiente.
 3. En *Administración → Consulta* debe aparecer, al final, la **Zona de pruebas**.
 
@@ -342,6 +383,25 @@ Hágalo en un horario tranquilo: entre los puntos 4 y 6 el sitio queda fuera de 
 8. Repita la prueba rápida (paso 9).
 9. Si todo funciona, borre la carpeta `/home/USUARIO/nueva` y el `.zip`. Deje las carpetas `…-anterior` hasta la próxima actualización: no estorban y permiten volver atrás.
 
+> **Si su raíz web está dentro de public_html (variante con index.php puente).** Es el caso de renalasch.cl: raíz web `/home/renalasc/public_html/manual.renalasch.cl`, con `index.html`, `assets/`, `.htaccess` y el `index.php` puente (ver «Cómo queda instalado» y el paso 2). Los puntos 1 a 3 y 7 a 9 son iguales. Cambian los puntos 4 a 6:
+>
+> - **4. Aparte la versión actual.**
+>   1. En `/home/renalasc/manualmetodos`, igual que arriba (4.1 y 4.2): renombre `bin`, `config`, `migraciones`, `src`, `vendor` y `composer.json` como `…-anterior`, y borre `.env.produccion.example`.
+>   2. En `/home/renalasc/manualmetodos/public` mueva **solo** `index.php` a una carpeta nueva `/home/renalasc/manualmetodos/public-anterior`.
+>   3. Antes de tocar la raíz web, abra su `.htaccess` actual (`/home/renalasc/public_html/manual.renalasch.cl/.htaccess`) y copie a un lugar seguro las 3 líneas de la guardia de host que siguen a `RewriteEngine On`. **Si su `.htaccess` actual no las tiene**, no hay nada que copiar: en el punto 5.4 agréguelas tal como aparecen en el paso 2 de la variante (punto 3).
+>   4. Cree `/home/renalasc/cliente-anterior` (**fuera** de `public_html`) y mueva ahí, desde `/home/renalasc/public_html/manual.renalasch.cl`, **solo** `index.html`, `assets` y `.htaccess`.
+>   5. **No toque el `index.php` de la raíz web (el puente) ni `.user.ini`, `php.ini`, `.well-known/` o `error_log`.** Tampoco `/home/renalasc/manualmetodos/.env` ni `var/`.
+> - **5. Ponga la versión nueva.**
+>   1. Mueva `bin`, `config`, `migraciones`, `src`, `vendor`, `composer.json` y `.env.produccion.example` desde `/home/renalasc/nueva/manualmetodos` a `/home/renalasc/manualmetodos`, como arriba.
+>   2. El `index.php` del paquete (`/home/renalasc/nueva/manualmetodos/public/index.php`) va **solo** a `/home/renalasc/manualmetodos/public/`. **Nunca lo copie a la raíz web: pisaría el puente y toda la API respondería «Error 500».**
+>   3. Para el cliente, use un zip para conservar las carpetas: en `/home/renalasc/nueva/manualmetodos/public` seleccione `index.html`, `assets` y `.htaccess` → **Comprimir** → `cliente.zip`, muévalo a `/home/renalasc/public_html/manual.renalasch.cl`, **Extraer** ahí y borre `cliente.zip`.
+>   4. Edite el `.htaccess` recién copiado a la raíz web y vuelva a agregar, **justo después de `RewriteEngine On`**, las 3 líneas de la guardia de host: las que copió en 4.3 o, si no las tenía, las del paso 2 de la variante (punto 3). Agréguelas siempre, aunque antes no estuvieran. Sin ellas, la carpeta respondería también desde el sitio principal.
+>   5. Confirme que en la raíz web siguen el `index.php` puente y, si existían, `.user.ini` o `php.ini`.
+> - **6. Revise PHP.** Vuelva a aplicar la versión de PHP del subdominio en **MultiPHP Manager**, porque el `.htaccess` de la raíz web se reemplazó y cPanel puede guardar ahí la versión. Los límites (`.user.ini`) viven en la raíz web, `/home/renalasc/public_html/manual.renalasch.cl`: confírmelos en **MultiPHP INI Editor**.
+> - En la prueba rápida (paso 9), `/.env` y `/composer.json` responden **404** en esta variante, no 403. Es correcto.
+> - Pida a los laboratorios que recarguen la página (o la cierren y la vuelvan a abrir): una pestaña abierta con el cliente anterior puede fallar al comentar hasta recargar.
+> - Al terminar, borre `/home/renalasc/nueva` y el `.zip`. Deje `cliente-anterior` y `public-anterior` hasta la próxima actualización.
+
 ### 10.2 Volver a la versión anterior
 
 Si la prueba rápida falla con la versión nueva y no hay una solución inmediata:
@@ -352,6 +412,11 @@ Si la prueba rápida falla con la versión nueva y no hay una solución inmediat
 4. Vuelva a aplicar la versión de PHP en **MultiPHP Manager** (paso 6.1).
 5. Si en el punto 7 de 10.1 importó un `.sql`, restaure el respaldo previo del punto 1 (paso 11).
 6. Repita la prueba rápida (paso 9) y avise al equipo técnico, con el correo del cron o el `error_log` si los hay.
+
+> **Si su raíz web está dentro de public_html (variante con index.php puente).** Los puntos 1, 2, 5 y 6 son iguales. Cambian el 3 y el 4:
+>
+> - **3.** En `/home/renalasc/manualmetodos/public` borre el `index.php` nuevo y mueva ahí el de `/home/renalasc/manualmetodos/public-anterior`. En `/home/renalasc/public_html/manual.renalasch.cl` borre **solo** `index.html`, `assets` y `.htaccess` (los nuevos) y mueva ahí el contenido de `/home/renalasc/cliente-anterior`. Si ese `.htaccess` anterior no tenía la guardia de host, agréguela como en el paso 2 de la variante. **El `index.php` puente no se toca.**
+> - **4.** Vuelva a aplicar la versión de PHP en **MultiPHP Manager** y confirme los límites de `.user.ini` en la raíz web.
 
 Cuando el problema esté resuelto, borre las carpetas `…-fallida`.
 

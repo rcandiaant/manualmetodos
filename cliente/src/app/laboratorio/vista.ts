@@ -219,6 +219,11 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
     if (!cerrada) alCambiarEstado({ estado: 'cerrada', mensaje: MENSAJES.cerrada });
   }
 
+  /** Un comentario respondió `version_obsoleta`: mismo trato que la copia (solo lectura y texto para copiar). */
+  function alVersionObsoleta(): void {
+    if (!cerrada) alCambiarEstado({ estado: 'error', codigo: 'version_obsoleta', mensaje: MENSAJES.error });
+  }
+
   /* ---------- Indicador y errores ---------- */
 
   function pintarIndicador(info: InfoGuardado): void {
@@ -555,6 +560,7 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
         if (vigente) recalcular();
       },
       alEtapaCerrada,
+      alVersionObsoleta,
       mostrarLista: consulta.etapa !== 'edicion_final',
       usarBorrador: enConsulta && !sinControl,
     });

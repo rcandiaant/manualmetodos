@@ -145,6 +145,8 @@ export interface OpcionesComentarios {
   alCambiar(): void;
   /** Una escritura respondió 409 `etapa_no_permite`. */
   alEtapaCerrada(): void;
+  /** Un comentario nuevo respondió 409 `version_obsoleta`: el admin reemplazó el texto del capítulo. */
+  alVersionObsoleta(): void;
   /** false en edicion_final: la lista va en "Mis aportes" (las anclas se siguen viendo). */
   mostrarLista?: boolean;
   /** false fuera de `consulta`: no se lee ni se escribe el borrador local. */
@@ -272,6 +274,10 @@ export function crearComentarios(op: OpcionesComentarios): Comentarios {
       op.alEtapaCerrada();
       return `La consulta se cerró: no se pudo ${accion}. El texto queda en el campo para copiarlo.`;
     }
+    if (e instanceof ErrorApi && e.codigo === 'version_obsoleta') {
+      op.alVersionObsoleta();
+      return `La versión del capítulo cambió en el servidor: no se pudo ${accion}. El texto queda en el campo para copiarlo; recargue la página para comentar sobre la versión vigente.`;
+    }
     return `No se pudo ${accion}: ${mensajeDe(e)}`;
   }
 
@@ -284,12 +290,12 @@ export function crearComentarios(op: OpcionesComentarios): Comentarios {
       return;
     }
     const ancla = nuevo;
-    const cuerpo: ComentarioEntrada = { bloqueId: ancla.bloqueId, rango: ancla.rango, texto };
+    const cuerpo: ComentarioEntrada = { bloqueId: ancla.bloqueId, rango: ancla.rango, texto, versionId: op.versionId };
     enviando = true;
     guardarNuevo.disabled = true;
     try {
       const r = await op.api.post<IdCreado>(`/capitulos/${op.capituloId}/comentarios`, cuerpo);
-      comentarios.push({ ...cuerpo, id: r.id, estado: 'abierto', creado: new Date().toISOString().replace(/\.\d+Z$/, 'Z') });
+      comentarios.push({ bloqueId: cuerpo.bloqueId, rango: cuerpo.rango, texto: cuerpo.texto, id: r.id, estado: 'abierto', creado: new Date().toISOString().replace(/\.\d+Z$/, 'Z') });
       creadosAqui.add(r.id);
       cerrarNuevo();
       pintarLista();

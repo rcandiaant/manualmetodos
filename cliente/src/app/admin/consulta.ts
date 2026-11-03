@@ -63,6 +63,8 @@ export function vistaConsulta(api: Api, opciones: OpcionesConsulta = {}): VistaC
   let listo: Promise<void> = Promise.resolve();
   let actual: Consulta | null = null;
   let ocupado = false;
+  /** Desfase (ms) entre la hora del servidor (`ahora` de GET/PUT /consulta) y el reloj local. */
+  let desfase = 0;
 
   const errores = cajaError();
   const exito = el('div', { class: 'exito', role: 'status', hidden: '' });
@@ -102,7 +104,7 @@ export function vistaConsulta(api: Api, opciones: OpcionesConsulta = {}): VistaC
   const errorReinicio = cajaError();
   const estadoReinicio = el('div', { class: 'exito', role: 'status', hidden: '' });
 
-  const ahora = (): number => Math.floor(reloj() / 1000) * 1000;
+  const ahora = (): number => Math.floor((reloj() + desfase) / 1000) * 1000;
 
   function avisar(campo: 'apertura' | 'cierre', entrada: HTMLInputElement): void {
     const caja = avisoCampo[campo];
@@ -149,6 +151,7 @@ export function vistaConsulta(api: Api, opciones: OpcionesConsulta = {}): VistaC
 
   function pintar(c: Consulta): void {
     actual = c;
+    if (c.ahora && !Number.isNaN(Date.parse(c.ahora))) desfase = Date.parse(c.ahora) - reloj();
     apertura.value = c.apertura ? aLocal(c.apertura) : '';
     cierre.value = c.cierre ? aLocal(c.cierre) : '';
     motivo.checked = c.motivoObligatorio;
@@ -171,7 +174,13 @@ export function vistaConsulta(api: Api, opciones: OpcionesConsulta = {}): VistaC
     const decisiones = actual.decisionesTomadas ?? 0;
     if (destino === 'consulta' && origen === 'edicion_final' && decisiones > 0) {
       res.push(
-        `Hay ${plural(decisiones, 'decisión tomada', 'decisiones tomadas')} por el revisor. Si un laboratorio vuelve a modificar una propuesta ya decidida, esa decisión se pierde.`,
+        `Hay ${plural(decisiones, 'decisión tomada', 'decisiones tomadas')} por el revisor. Las propuestas que los laboratorios no cambien conservan su decisión. Si un laboratorio modifica una propuesta ya decidida, pasa a ser una propuesta nueva y llega pendiente: el revisor tendrá que decidirla de nuevo.`,
+      );
+    }
+    const finales = actual.versionesFinal ?? 0;
+    if (destino === 'consulta' && origen === 'edicion_final' && finales > 0) {
+      res.push(
+        `Hay ${plural(finales, 'versión final guardada', 'versiones finales guardadas')}. Si los laboratorios cambian sus propuestas, el revisor tendrá que revisarlas y volver a guardar la versión final.`,
       );
     }
     const aportes = actual.aportes ?? 0;
