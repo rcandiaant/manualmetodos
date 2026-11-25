@@ -237,4 +237,29 @@ describe('admin: usuarios', () => {
     await vista.listo;
     expect(raiz.querySelector('.error')?.textContent).toBeTruthy();
   });
+
+  it('marca las cuentas que siguen con la clave provisoria', async () => {
+    const lista: UsuarioAdmin[] = [
+      { ...USUARIOS[0], clavePendiente: false },
+      { ...USUARIOS[1], clavePendiente: true },
+    ];
+    const f = fetchSimulado(json(200, lista));
+    const raiz = document.createElement('div');
+    const vista = vistaUsuarios(crearApi({ fetch: f.fetch, alSinSesion: () => {} }));
+    vista.montar(raiz);
+    await vista.listo;
+    const filas = raiz.querySelectorAll('tbody tr');
+    expect(filas[0].textContent).not.toContain('Clave provisoria sin cambiar');
+    expect(filas[1].textContent).toContain('Clave provisoria sin cambiar');
+  });
+
+  it('regenerar la clave deja la cuenta marcada como provisoria', async () => {
+    const { raiz, vista } = await montar(json(200, { clave: 'OtraClave1234567' }));
+    const fila = () => [...raiz.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('Ana Pérez'))!;
+    expect(fila().textContent).not.toContain('Clave provisoria sin cambiar');
+    ([...fila().querySelectorAll('button')].find((b) => b.textContent === 'Regenerar clave') as HTMLButtonElement).click();
+    boton(raiz, 'Confirmar regeneración').click();
+    await vista.listo;
+    expect(fila().textContent).toContain('Clave provisoria sin cambiar');
+  });
 });
