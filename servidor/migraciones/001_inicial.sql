@@ -1,6 +1,6 @@
 -- Manual de métodos: esquema inicial.
 -- Importable tal cual en phpMyAdmin (MariaDB >= 10.3 / MySQL >= 8.0). Es idempotente.
--- Antes del primer despliegue, los cambios de esquema se hacen aquí mismo (no hay 002+).
+-- Ya está desplegado: los cambios de esquema van en migraciones nuevas (002+), no aquí.
 -- Sin comentarios con punto y coma, ni punto y coma dentro de cadenas: el Migrador parte por ";".
 
 SET NAMES utf8mb4;
