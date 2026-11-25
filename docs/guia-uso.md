@@ -142,6 +142,7 @@ El **registro de cambios** reúne en una sola tabla todos los aportes de los lab
 - Las claves nuevas **se muestran una sola vez**. Cópielas o use **Descargar CSV** y entrégueselas a cada persona por un canal seguro.
 - Las cuentas importadas son de laboratorio. Para el revisor, cambie los roles y pulse **Guardar roles**. Una persona puede tener varios roles.
 - **Desactivar** impide entrar. **Regenerar clave** entrega una clave nueva y cierra al instante todas las sesiones abiertas de esa cuenta; úselo, por ejemplo, si cambia el responsable de un laboratorio o si alguien olvidó su clave.
+- **Borrar** elimina una cuenta para siempre, después de confirmar. Solo se puede con cuentas **sin aportes** (sin cambios, comentarios ni decisiones), por ejemplo cuentas de prueba, duplicadas o de personas que nunca entraron. Si la cuenta tiene aportes, la plataforma lo avisa: en ese caso use **Desactivar**, que impide entrar sin perder lo que la persona aportó. No puede borrar su propia cuenta.
 - Las claves importadas o regeneradas son **provisorias**: en su primer ingreso, la persona debe definir una propia (ver «Primer ingreso» al comienzo). En la lista, la columna **Estado** muestra «Clave provisoria sin cambiar» en las cuentas que aún no lo hacen.
 
 El primer administrador lo crea el equipo técnico al instalar la plataforma (ver la [guía de despliegue](despliegue.md)).
