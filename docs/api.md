@@ -23,7 +23,9 @@ Este documento es el contrato entre el servidor PHP (`servidor/`) y el cliente (
 | 400 | `entrada_invalida` | JSON mal formado, UTF-8 inválido, no es un objeto, campo ausente o mal formado (`campos` dice cuál), un documento demasiado profundo (más de 64 niveles JSON) |
 | 401 | `credenciales_invalidas` | login fallido (la misma respuesta para correo inexistente, clave errónea, cuenta inactiva u honeypot lleno) |
 | 401 | `sin_sesion` | no hay sesión válida (también en escrituras: el cliente debe volver a entrar) |
+| 400 | `clave_actual_incorrecta` | `POST /sesion/clave` con una clave actual que no corresponde (§2.5) |
 | 403 | `sin_permiso` | hay sesión, pero el rol no alcanza |
+| 403 | `cambio_clave_requerido` | la cuenta tiene clave provisoria: solo se permiten `GET /sesion`, `DELETE /sesion` y `POST /sesion/clave` (§2.5) |
 | 403 | `csrf_invalido` | hay sesión, pero `X-CSRF-Token` falta, está vacío o no coincide |
 | 403 | `origen_invalido` | `Origin` no coincide con `Host`, `Origin: null` o `Sec-Fetch-Site: cross-site` (solo en métodos distintos de GET/HEAD) |
 | 404 | `no_encontrado` | la ruta no existe, el recurso no existe **o es de otro laboratorio** (no se distingue), o un `{id}`/`{uid}` con formato inválido |
@@ -35,7 +37,7 @@ Este documento es el contrato entre el servidor PHP (`servidor/`) y el cliente (
 | 413 | `cuerpo_muy_grande` | el cuerpo supera el tope de la ruta (§1.4) |
 | 415 | `tipo_no_soportado` | hay cuerpo y `Content-Type` no es `application/json` |
 | 422 | `documento_invalido` | `docJson` o los nodos de una sugerencia no cumplen el esquema del documento |
-| 429 | `demasiados_intentos` | login bloqueado temporalmente (con cabecera `Retry-After` en segundos) |
+| 429 | `demasiados_intentos` | login o cambio de clave bloqueado temporalmente (con cabecera `Retry-After` en segundos) |
 | 500 | `respaldo_fallido` | `POST /admin/reiniciar` no pudo escribir el respaldo previo; no se borró nada (§4.6) |
 | 500 | `error_interno` | error no previsto; el detalle va solo al `error_log` del servidor |
 
@@ -88,7 +90,7 @@ Toda respuesta de la API lleva `Content-Security-Policy`, `X-Content-Type-Option
    - Validación: `correo` es un texto no vacío de 254 caracteres como máximo; `clave` es un texto no vacío de 1 024 bytes como máximo. Si no, 400.
 2. Si entra, responde 200:
    ```json
-   {"usuario": {"id": 12, "nombre": "Ana Pérez", "laboratorio": "Laboratorio Norte", "roles": ["laboratorio"]}, "csrf": "<token>"}
+   {"usuario": {"id": 12, "nombre": "Ana Pérez", "laboratorio": "Laboratorio Norte", "roles": ["laboratorio"], "debeCambiarClave": false}, "csrf": "<token>"}
    ```
    con `Set-Cookie`:
    - con `COOKIE_SEGURA=1`: `__Host-mm_sesion=<id>; Path=/; HttpOnly; SameSite=Strict; Secure`;
@@ -114,6 +116,7 @@ Toda respuesta de la API lleva `Content-Security-Policy`, `X-Content-Type-Option
 - **401 `sin_sesion`**: no hay sesión, o venció. El cliente debe mostrar el login. Vale también para escrituras sin sesión, que no dan 403.
 - **403 `csrf_invalido`**: hay sesión, pero falta el token o es incorrecto. El cliente debe recargar el token con `GET /sesion` y reintentar una vez.
 - **403 `sin_permiso`**: el rol no alcanza. No hay que reintentar.
+- **403 `cambio_clave_requerido`**: la cuenta tiene clave provisoria. El cliente debe llevar a definir la clave (§2.5).
 
 ### 2.3 Roles
 
@@ -125,6 +128,19 @@ Toda respuesta de la API lleva `Content-Security-Policy`, `X-Content-Type-Option
 - El cliente la pasa a `calcularSugerencias(base, copia, autor)`.
 - El `id` de cada sugerencia debe empezar por `u<id>:` y seguir con al menos un carácter más; si no, responde 400 con `campos["sugerencias[i].id"]`.
 - El `autor` que manda el cliente se exige, pero se descarta: en las lecturas, `autor` lo pone el servidor.
+
+### 2.5 Clave provisoria y cambio de clave
+
+**Clave provisoria.** Toda clave que entrega el administrador (importación de usuarios o **Regenerar clave**) queda como provisoria (`usuarios.clave_provisoria = 1`, migración `002_clave_provisoria.sql`). El usuario de la sesión trae `debeCambiarClave: true`.
+- Con clave provisoria se puede entrar, pero solo responden `GET /sesion`, `DELETE /sesion` y `POST /sesion/clave`. Todo lo demás da 403 `cambio_clave_requerido`, sin importar los roles. El bloqueo está en `Sesion::exigirRol()`, por donde pasan todas las rutas.
+- La migración 002 marcó como provisorias las cuentas que ya existían, salvo las de admin. El primer administrador (`bin/crear-admin.php`) no queda con clave provisoria.
+
+**`POST /api/sesion/clave`** con `{"actual": "…", "nueva": "…"}` (con CSRF; vale con clave provisoria o propia):
+- Validación (400 `entrada_invalida`, con `campos`): `actual` es un texto no vacío de 1 024 bytes como máximo; `nueva` tiene **al menos 10 caracteres** y 1 024 bytes como máximo, no empieza ni termina con espacios y es distinta de `actual`.
+- Si `actual` no corresponde: 400 `clave_actual_incorrecta` (con `campos.actual`). No es 401, para que el cliente no cierre la sesión.
+- Tiene el mismo límite de intentos que el login (claves `ip:<ip>` y `cuenta:u<id>`): 5 fallos bloquean 60 s y después responde 429 `demasiados_intentos`.
+- Si entra: guarda la clave nueva, quita la marca de provisoria y **reabre la sesión** (id de cookie y `csrf` nuevos). Responde 200 `{usuario, csrf}`, como el login, con `debeCambiarClave: false`. Las demás sesiones de la cuenta caen, porque la huella de la clave cambió.
+- Queda en auditoría `cambio_clave` (con `eraProvisoria`) o `cambio_clave_fallido`. Nunca se registran las claves.
 
 ---
 
@@ -168,6 +184,7 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 | `POST /sesion` | — | — | 200 `{usuario, csrf}` · 401 · 429 |
 | `GET /sesion` | cualquiera | — | 200 `{usuario, csrf}` · 401 `sin_sesion` |
 | `DELETE /sesion` | cualquiera | — | 204 · 401 `sin_sesion` |
+| `POST /sesion/clave` | cualquiera (también con clave provisoria) | — | 200 `{usuario, csrf}` · 400 · 429 (§2.5) |
 | `GET /consulta` | cualquiera | — | `{apertura, cierre, etapa, motivoObligatorio}`; el admin recibe además `decisionesTomadas`, `aportes` y `reinicioPermitido` |
 | `GET /capitulos` | cualquiera | — | lista de capítulos |
 | `GET /capitulos/{id}/base` | cualquiera | — | `{versionId, docJson}` + `ETag` / 304 |
@@ -355,7 +372,7 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - Si la base rechaza el borrado (interbloqueo, espera agotada o una FK por un aporte recién creado), responde 409 `conflicto_concurrente` y no cambia nada.
 - Queda en auditoría (`borrar_capitulo`) con `slug`, `titulo`, `orden` y los ids de las versiones borradas.
 
-**`GET /admin/usuarios`** devuelve `[{"id", "nombre", "laboratorio", "correo", "roles", "activo"}]`, ordenado por laboratorio, nombre e id. El correo va descifrado.
+**`GET /admin/usuarios`** devuelve `[{"id", "nombre", "laboratorio", "correo", "roles", "activo", "clavePendiente"}]`, ordenado por laboratorio, nombre e id. El correo va descifrado. `clavePendiente` es `true` mientras la persona siga con la clave provisoria (§2.5).
 
 **`POST /admin/usuarios/importar`** con `{"csv": "nombre,correo,laboratorio\nAna,ana@lab.cl,Lab Norte"}`:
 - Cada línea tiene tres campos: nombre, correo y laboratorio.
@@ -371,9 +388,9 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - Los números de línea de los errores son líneas físicas del texto enviado, contando el encabezado si lo hay y las líneas en blanco iniciales.
 - **Máximo 100 filas por importación.**
 - Si hay cualquier línea inválida o un correo repetido (en el CSV o ya existente), responde 400 con los números de línea física y no crea ninguna cuenta.
-- Responde 201 `[{"correo": "ana@lab.cl", "clave": "Xy7…"}]`. Las claves (16 caracteres) **se muestran una sola vez**.
+- Responde 201 `[{"correo": "ana@lab.cl", "clave": "Xy7…"}]`. Las claves (16 caracteres) **se muestran una sola vez** y quedan como **provisorias** (§2.5).
 
-**`POST /admin/usuarios/{id}/clave`** responde 200 `{"clave": "…"}` con una clave regenerada. Si el usuario no existe, 404. **Cierra todas las sesiones abiertas de esa cuenta** (§2.1).
+**`POST /admin/usuarios/{id}/clave`** responde 200 `{"clave": "…"}` con una clave regenerada, que queda como **provisoria** (§2.5). Si el usuario no existe, 404. **Cierra todas las sesiones abiertas de esa cuenta** (§2.1).
 
 **`PATCH /admin/usuarios/{id}`** con `{"activo"?: bool, "roles"?: ["laboratorio", …]}`:
 - Hace falta al menos uno de los dos campos; `roles` debe ser una lista no vacía de roles válidos.

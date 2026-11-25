@@ -2,6 +2,16 @@
 
 Esta guía explica, en pocas palabras, cómo se usa la plataforma según su rol. Para entrar necesita el correo y la clave que le entregó el administrador. Si olvida la clave, pídale al administrador una nueva.
 
+## Primer ingreso: defina su clave
+
+La clave que entrega el administrador es **provisoria** y sirve para entrar una sola vez:
+
+1. Entre con su correo y la clave provisoria.
+2. La plataforma abre **Defina su clave**. Escriba la clave provisoria y luego dos veces la clave nueva, de **al menos 10 caracteres**. Una frase sirve bien, por ejemplo «suelo arcilloso 2026».
+3. Pulse **Guardar clave**. Desde ese momento entra con su clave nueva y la provisoria deja de funcionar.
+
+Mientras no defina su clave, no puede usar el resto de la plataforma: solo cambiarla o salir. Más adelante puede cambiarla cuando quiera con **Cambiar mi clave**, en la parte superior del inicio.
+
 ## Las tres etapas
 
 La plataforma pasa sola de una etapa a otra según las fechas que fija el administrador, que puede cambiarlas en cualquier momento (por ejemplo, abrir o cerrar la consulta en el acto). Todas las horas son de Chile.
@@ -131,7 +141,8 @@ El **registro de cambios** reúne en una sola tabla todos los aportes de los lab
 - **Importar** hasta 100 cuentas por vez, con tres columnas: nombre, correo y laboratorio. Lo más simple es seleccionar esas tres columnas en Excel, copiarlas y pegarlas en el cuadro. También puede pegar o elegir un CSV separado por `;`, `,` o tabulador. La fila de encabezado `nombre,correo,laboratorio` es opcional. Los espacios sobrantes y los caracteres invisibles que a veces trae Excel se limpian solos. Si una fila tiene un error, no se crea ninguna cuenta y se indica la línea.
 - Las claves nuevas **se muestran una sola vez**. Cópielas o use **Descargar CSV** y entrégueselas a cada persona por un canal seguro.
 - Las cuentas importadas son de laboratorio. Para el revisor, cambie los roles y pulse **Guardar roles**. Una persona puede tener varios roles.
-- **Desactivar** impide entrar. **Regenerar clave** entrega una clave nueva y cierra al instante todas las sesiones abiertas de esa cuenta; úselo, por ejemplo, si cambia el responsable de un laboratorio.
+- **Desactivar** impide entrar. **Regenerar clave** entrega una clave nueva y cierra al instante todas las sesiones abiertas de esa cuenta; úselo, por ejemplo, si cambia el responsable de un laboratorio o si alguien olvidó su clave.
+- Las claves importadas o regeneradas son **provisorias**: en su primer ingreso, la persona debe definir una propia (ver «Primer ingreso» al comienzo). En la lista, la columna **Estado** muestra «Clave provisoria sin cambiar» en las cuentas que aún no lo hacen.
 
 El primer administrador lo crea el equipo técnico al instalar la plataforma (ver la [guía de despliegue](despliegue.md)).
 
