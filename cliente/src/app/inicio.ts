@@ -7,7 +7,7 @@
 import { boton, el, mensajeDe } from '../editor/ui';
 import { ErrorApi, SIN_CONEXION, type Api } from './api';
 import type { Vista } from './router';
-import { tieneRol } from './sesion';
+import { RUTA_CAMBIAR_CLAVE, tieneRol } from './sesion';
 import type { CapituloLista, Consulta, Etapa, Usuario } from './tipos-api';
 
 const ZONA = 'America/Santiago';
@@ -182,6 +182,7 @@ export function vistaInicio(api: Api, u: Usuario, deps: DepsInicio): Vista & { l
           { class: 'cabecera-acciones' },
           informe,
           menuAdmin,
+          el('a', { href: RUTA_CAMBIAR_CLAVE, class: 'enlace-boton' }, 'Cambiar mi clave'),
           boton('Salir', pedirSalir),
         ),
       );

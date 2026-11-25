@@ -39,6 +39,8 @@ export interface Usuario {
   nombre: string;
   laboratorio: string;
   roles: Rol[];
+  /** true: entró con una clave provisoria y debe definir una propia (solo puede cambiarla o salir). */
+  debeCambiarClave?: boolean;
 }
 
 export interface Sesion {
@@ -51,6 +53,12 @@ export interface Login {
   clave: string;
   /** Honeypot: siempre vacío. */
   sitio_web: '';
+}
+
+/** `POST /sesion/clave`: responde como el login (`Sesion`, con usuario y csrf nuevos). */
+export interface CambioClave {
+  actual: string;
+  nueva: string;
 }
 
 // §4.1 Consulta
@@ -244,6 +252,8 @@ export interface UsuarioAdmin {
   correo: string;
   roles: Rol[];
   activo: boolean;
+  /** true: sigue con la clave provisoria que entregó el administrador. */
+  clavePendiente?: boolean;
 }
 
 export interface CuentaImportada {

@@ -9,9 +9,11 @@
 import { el } from '../editor/ui';
 import { ErrorApi, SIN_CONEXION, type Api } from './api';
 import { RUTA_INICIO, type Vista } from './router';
-import type { Rol, Sesion, Usuario } from './tipos-api';
+import type { CambioClave, Rol, Sesion, Usuario } from './tipos-api';
 
 export const RUTA_LOGIN = '#/entrar';
+/** Definir o cambiar la propia clave (`cambiar-clave.ts`). */
+export const RUTA_CAMBIAR_CLAVE = '#/clave';
 
 let usuario: Usuario | null = null;
 /** Ruta pedida antes de caer en el login y quién tenía la sesión (null: nadie, p. ej. un enlace directo). */
@@ -23,6 +25,9 @@ export const usuarioActual = (): Usuario | null => usuario;
 export const claveAutor = (u: Usuario): string => `u${u.id}`;
 
 export const tieneRol = (u: Usuario, rol: Rol): boolean => u.roles.includes(rol);
+
+/** Con clave provisoria solo se puede cambiar la clave o salir. */
+export const debeCambiarClave = (u: Usuario): boolean => u.debeCambiarClave === true;
 
 /** `GET /sesion`: recupera usuario y csrf tras una recarga. `null` si no hay sesión. */
 export async function iniciar(api: Api): Promise<Usuario | null> {
@@ -43,6 +48,15 @@ export async function iniciar(api: Api): Promise<Usuario | null> {
 /** `POST /sesion`. El honeypot `sitio_web` viaja siempre vacío. */
 export async function entrar(api: Api, correo: string, clave: string): Promise<Usuario> {
   const s = await api.post<Sesion>('/sesion', { correo, clave, sitio_web: '' });
+  usuario = s.usuario;
+  api.fijarCsrf(s.csrf);
+  return s.usuario;
+}
+
+/** `POST /sesion/clave`: el servidor reabre la sesión, así que llegan usuario y csrf nuevos. */
+export async function cambiarClave(api: Api, actual: string, nueva: string): Promise<Usuario> {
+  const cuerpo: CambioClave = { actual, nueva };
+  const s = await api.post<Sesion>('/sesion/clave', cuerpo);
   usuario = s.usuario;
   api.fijarCsrf(s.csrf);
   return s.usuario;
@@ -156,7 +170,7 @@ export function vistaLogin(api: Api, deps: DepsLogin): Vista {
         enviar.disabled = true;
         caja.hidden = true;
         void entrar(api, correo.value.trim(), clave.value)
-          .then((u) => deps.navegar(tomarRutaPendiente(u.id) ?? RUTA_INICIO))
+          .then((u) => deps.navegar(debeCambiarClave(u) ? RUTA_CAMBIAR_CLAVE : (tomarRutaPendiente(u.id) ?? RUTA_INICIO)))
           .catch((e: unknown) => {
             clave.value = '';
             caja.textContent = mensajeLogin(e);

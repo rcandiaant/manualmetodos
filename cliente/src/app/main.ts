@@ -10,20 +10,40 @@ import { crearApi } from './api';
 import { vistaInicio } from './inicio';
 import { vistaCapitulo } from './laboratorio/vista';
 import { definirRutas, navegar, RUTA_INICIO, vistaDiferida, type FabricaVista, type Parametros, type Vista } from './router';
-import { iniciar, conCompuerta, manejarSinSesion, RUTA_LOGIN, salir, usuarioActual, vistaLogin } from './sesion';
+import { vistaCambiarClave } from './cambiar-clave';
+import {
+  iniciar,
+  conCompuerta,
+  debeCambiarClave,
+  manejarSinSesion,
+  RUTA_CAMBIAR_CLAVE,
+  RUTA_LOGIN,
+  salir,
+  usuarioActual,
+  vistaLogin,
+} from './sesion';
 import type { Usuario } from './tipos-api';
 
 const alSinSesion = manejarSinSesion((hash) => navegar(hash));
 const compuerta = conCompuerta(alSinSesion);
 const api = crearApi({ alSinSesion: compuerta.handler });
 
-/** Vista protegida: sin sesión, guarda la ruta pedida y va al login. */
+const VISTA_VACIA: Vista = { montar() {}, desmontar() {} };
+
+/**
+ * Vista protegida: sin sesión, guarda la ruta pedida y va al login. Con clave provisoria va a
+ * definir la clave (el servidor igual rechazaría todo lo demás).
+ */
 function protegida(fabrica: (u: Usuario) => Vista): () => Vista {
   return () => {
     const u = usuarioActual();
     if (!u) {
       alSinSesion();
-      return { montar() {}, desmontar() {} };
+      return VISTA_VACIA;
+    }
+    if (debeCambiarClave(u)) {
+      void navegar(RUTA_CAMBIAR_CLAVE);
+      return VISTA_VACIA;
     }
     return fabrica(u);
   };
@@ -75,6 +95,19 @@ async function arrancar(): Promise<void> {
       ),
       ...rutasAdminDiferidas(),
       [RUTA_LOGIN]: () => vistaLogin(api, { navegar }),
+      [RUTA_CAMBIAR_CLAVE]: () => {
+        if (!usuarioActual()) {
+          alSinSesion();
+          return VISTA_VACIA;
+        }
+        return vistaCambiarClave(api, {
+          navegar,
+          salir: async () => {
+            await salir(api);
+            await navegar(RUTA_LOGIN);
+          },
+        });
+      },
       '#/revisar/:id': (p, q) =>
         protegida((u) =>
           vistaDiferida(async () => (await import('./revisor/vista')).vistaRevisor(api, Number(p.id), q, u.id)),
