@@ -29,6 +29,7 @@ export const OBLIGATORIOS = [
   'public/index.html',
   'vendor/autoload.php',
   'migraciones/001_inicial.sql',
+  'migraciones/002_clave_provisoria.sql',
 ] as const;
 
 const EJEMPLO_ENV = '.env.produccion.example';
