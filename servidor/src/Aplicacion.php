@@ -117,6 +117,7 @@ final class Aplicacion
         $this->ruta('POST', '/api/admin/usuarios/importar', fn (Peticion $p) => $this->adminCtl()->importarUsuarios($p));
         $this->ruta('POST', '/api/admin/usuarios/{id}/clave', fn (Peticion $p, array $a) => $this->adminCtl()->regenerarClave($p, $a));
         $this->ruta('PATCH', '/api/admin/usuarios/{id}', fn (Peticion $p, array $a) => $this->adminCtl()->actualizarUsuario($p, $a));
+        $this->ruta('DELETE', '/api/admin/usuarios/{id}', fn (Peticion $p, array $a) => $this->adminCtl()->borrarUsuario($p, $a));
         $this->ruta('PUT', '/api/admin/consulta', fn (Peticion $p) => $this->adminCtl()->guardarConsulta($p));
         // «Reiniciar datos de prueba»: la ruta solo existe con REINICIO_PRUEBAS=1 (si no, 404 como cualquier otra).
         if ($this->config->reinicioPruebas) {

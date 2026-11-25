@@ -118,6 +118,67 @@ final class Usuarios
         $this->bd->prepare('UPDATE usuarios SET clave_hash = ?, clave_provisoria = ? WHERE id = ?')->execute([$claveHash, $provisoria ? 1 : 0, $id]);
     }
 
+    /**
+     * Borra una cuenta sin aportes, junto con sus contadores de intentos de login, en una transacción.
+     * La fila se bloquea (FOR UPDATE) antes de contar los aportes: un INSERT concurrente en una tabla hija
+     * espera ese bloqueo por la FK, así que no puede colarse un aporte entre la comprobación y el borrado.
+     * @return array{estado:'borrado',usuario:array{nombre:string,laboratorio:string,roles:list<string>}}
+     *       |array{estado:'no_existe'}|array{estado:'con_aportes'}
+     * @throws \PDOException si la base rechaza el borrado (FK, interbloqueo): no se borra nada
+     */
+    public function borrarSinAportes(int $id): array
+    {
+        $this->bd->beginTransaction();
+        try {
+            $st = $this->bd->prepare('SELECT nombre, laboratorio, roles, correo_indice FROM usuarios WHERE id = ? FOR UPDATE');
+            $st->execute([$id]);
+            $f = $st->fetch();
+            if ($f === false) {
+                $this->bd->rollBack();
+                return ['estado' => 'no_existe'];
+            }
+            if ($this->tieneAportes($id)) {
+                $this->bd->rollBack();
+                return ['estado' => 'con_aportes'];
+            }
+            // Contadores del login (cuenta:<índice hex>) y del cambio de clave (cuenta:u<id>).
+            $this->bd->prepare('DELETE FROM intentos_login WHERE clave IN (?, ?)')
+                ->execute(['cuenta:' . bin2hex((string) $f['correo_indice']), 'cuenta:u' . $id]);
+            $this->bd->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
+            $this->bd->commit();
+        } catch (\Throwable $e) {
+            if ($this->bd->inTransaction()) {
+                $this->bd->rollBack();
+            }
+            throw $e;
+        }
+        return [
+            'estado' => 'borrado',
+            'usuario' => [
+                'nombre' => (string) $f['nombre'],
+                'laboratorio' => (string) $f['laboratorio'],
+                'roles' => $f['roles'] === '' ? [] : explode(',', (string) $f['roles']),
+            ],
+        ];
+    }
+
+    /**
+     * Aportes de la persona: su trabajo de laboratorio (copias, instantáneas, sugerencias, comentarios),
+     * sus decisiones de revisión (resuelto_por) o versiones de capítulo que subió (creado_por).
+     */
+    private function tieneAportes(int $id): bool
+    {
+        $st = $this->bd->prepare(
+            'SELECT EXISTS(SELECT 1 FROM copias_laboratorio WHERE usuario_id = ?)'
+            . ' OR EXISTS(SELECT 1 FROM revisiones_copia WHERE usuario_id = ?)'
+            . ' OR EXISTS(SELECT 1 FROM sugerencias WHERE usuario_id = ? OR resuelto_por = ?)'
+            . ' OR EXISTS(SELECT 1 FROM comentarios WHERE usuario_id = ? OR resuelto_por = ?)'
+            . ' OR EXISTS(SELECT 1 FROM versiones_capitulo WHERE creado_por = ?)'
+        );
+        $st->execute([$id, $id, $id, $id, $id, $id, $id]);
+        return (bool) $st->fetchColumn();
+    }
+
     /** @param list<string>|null $roles */
     public function actualizar(int $id, ?bool $activo, ?array $roles): void
     {

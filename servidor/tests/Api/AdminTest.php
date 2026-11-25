@@ -704,4 +704,118 @@ final class AdminTest extends TestCase
         self::assertSame(2097152, \Manual\Http\Peticion::limiteCuerpo('PUT', '/api/capitulos/7/copia'));
         self::assertSame(2097152, \Manual\Http\Peticion::limiteCuerpo('POST', '/api/admin/usuarios/importar'));
     }
+
+    // --- Borrar usuarios (DELETE /api/admin/usuarios/{id}) ---
+
+    private function existeUsuario(int $id): bool
+    {
+        $st = self::$bd->prepare('SELECT COUNT(*) FROM usuarios WHERE id = ?');
+        $st->execute([$id]);
+        return (int) $st->fetchColumn() === 1;
+    }
+
+    public function test_borrar_usuario_sin_aportes(): void
+    {
+        [$c] = $this->admin();
+        $u = $this->crearUsuario(['correo' => 'borrar@lab.cl', 'nombre' => 'Para Borrar', 'laboratorio' => 'Lab Borrable', 'roles' => ['laboratorio', 'revisor']]);
+        $sesion = $this->cliente($u);
+        // Un login fallido deja contadores de la cuenta en intentos_login.
+        self::assertSame(401, (new ClienteApi($this->app))->post('/sesion', ['correo' => 'borrar@lab.cl', 'clave' => 'mala', 'sitio_web' => ''])->estado);
+        self::assertSame(1, (int) self::$bd->query("SELECT COUNT(*) FROM intentos_login WHERE clave LIKE 'cuenta:%'")->fetchColumn());
+
+        $r = $c->delete("/admin/usuarios/{$u['id']}");
+
+        self::assertSame(204, $r->estado, $r->cuerpo());
+        self::assertFalse($this->existeUsuario($u['id']));
+        self::assertSame(0, (int) self::$bd->query("SELECT COUNT(*) FROM intentos_login WHERE clave LIKE 'cuenta:%'")->fetchColumn());
+        // Sus sesiones abiertas caen en la siguiente petición.
+        self::assertSame(401, $sesion->get('/sesion')->estado);
+        self::assertNotContains('borrar@lab.cl', array_column($c->get('/admin/usuarios')->datos, 'correo'));
+
+        $aud = $this->auditoria('borrar_usuario');
+        self::assertCount(1, $aud);
+        self::assertSame(['nombre' => 'Para Borrar', 'laboratorio' => 'Lab Borrable', 'roles' => ['laboratorio', 'revisor']], json_decode((string) $aud[0]['detalle'], true));
+        self::assertStringNotContainsString('borrar@lab.cl', (string) $aud[0]['detalle']);
+
+        // El correo queda libre: se puede volver a importar.
+        self::assertSame(201, $c->post('/admin/usuarios/importar', ['csv' => 'Para Borrar,borrar@lab.cl,Lab Borrable'])->estado);
+    }
+
+    public function test_borrar_usuario_con_aportes_da_409_y_no_borra_nada(): void
+    {
+        [$c] = $this->admin();
+        $s = $c->post('/admin/capitulos', $this->capitulo())->datos;
+        $cap = $s['id'];
+        $ver = $s['versionId'];
+        $lab = $this->crearUsuario()['id'];
+        $rev = $this->crearUsuario(['roles' => ['revisor']])['id'];
+
+        // [usuario a borrar, SQL del aporte, tabla a vaciar después]
+        $aportes = [
+            'copia' => [$lab, "INSERT INTO copias_laboratorio (usuario_id, capitulo_id, version_base_id, doc_json) VALUES ($lab, $cap, $ver, '{}')", 'copias_laboratorio'],
+            'instantanea' => [$lab, "INSERT INTO revisiones_copia (usuario_id, capitulo_id, doc_json) VALUES ($lab, $cap, '{}')", 'revisiones_copia'],
+            'sugerencia' => [$lab, "INSERT INTO sugerencias (usuario_id, capitulo_id, version_base_id, uid, bloque_id, tipo, datos) VALUES ($lab, $cap, $ver, 'u1:a', 'b1', 'contenido', '{}')", 'sugerencias'],
+            'comentario' => [$lab, "INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto) VALUES ($lab, $cap, 'b1', '{}', 'hola')", 'comentarios'],
+            'sugerencia resuelta' => [$rev, "INSERT INTO sugerencias (usuario_id, capitulo_id, version_base_id, uid, bloque_id, tipo, datos, estado, resuelto_por) VALUES ($lab, $cap, $ver, 'u1:b', 'b1', 'contenido', '{}', 'aceptada', $rev)", 'sugerencias'],
+            'comentario resuelto' => [$rev, "INSERT INTO comentarios (usuario_id, capitulo_id, bloque_id, rango, texto, estado, resuelto_por) VALUES ($lab, $cap, 'b1', '{}', 'hola', 'resuelto', $rev)", 'comentarios'],
+        ];
+        foreach ($aportes as $nombre => [$id, $sql, $tabla]) {
+            self::$bd->exec($sql);
+            $r = $c->delete("/admin/usuarios/$id");
+            self::assertSame(409, $r->estado, "$nombre: " . $r->cuerpo());
+            self::assertSame('operacion_no_permitida', $r->datos['error']['codigo']);
+            self::assertStringContainsString('Desactívela', $r->datos['error']['mensaje']);
+            self::assertTrue($this->existeUsuario($id), $nombre);
+            self::$bd->exec("DELETE FROM $tabla");
+        }
+
+        // Un admin que subió una versión de capítulo (creado_por) tampoco se borra.
+        $otroAdmin = $this->crearUsuario(['roles' => ['admin']]);
+        self::assertSame(201, $this->cliente($otroAdmin)->post('/admin/capitulos', $this->capitulo(['slug' => 'cap-2']))->estado);
+        self::assertSame(409, $c->delete("/admin/usuarios/{$otroAdmin['id']}")->estado);
+        self::assertTrue($this->existeUsuario($otroAdmin['id']));
+
+        self::assertCount(0, $this->auditoria('borrar_usuario'));
+        // Sin aportes, ya se pueden borrar.
+        self::assertSame(204, $c->delete("/admin/usuarios/$lab")->estado);
+        self::assertSame(204, $c->delete("/admin/usuarios/$rev")->estado);
+    }
+
+    public function test_borrar_usuario_protege_la_propia_cuenta_y_exige_admin(): void
+    {
+        [$c, $a] = $this->admin();
+        $r = $c->delete("/admin/usuarios/{$a['id']}");
+        self::assertSame(409, $r->estado);
+        self::assertSame('operacion_no_permitida', $r->datos['error']['codigo']);
+        self::assertTrue($this->existeUsuario($a['id']));
+
+        self::assertSame(404, $c->delete('/admin/usuarios/99999')->estado);
+
+        $u = $this->crearUsuario();
+        foreach ([['laboratorio'], ['revisor']] as $roles) {
+            $otro = $this->cliente($this->crearUsuario(['roles' => $roles]));
+            self::assertSame(403, $otro->delete("/admin/usuarios/{$u['id']}")->estado);
+        }
+        $sinCsrf = $c->enviar('DELETE', "/api/admin/usuarios/{$u['id']}", [], ['x-csrf-token' => null]);
+        self::assertSame(403, $sinCsrf->estado);
+        self::assertSame('csrf_invalido', $sinCsrf->datos['error']['codigo']);
+        self::assertTrue($this->existeUsuario($u['id']));
+    }
+
+    public function test_borrar_usuario_con_choque_de_fk_da_409_y_no_borra_nada(): void
+    {
+        [$c] = $this->admin();
+        $u = $this->crearUsuario();
+        // Simula la red de seguridad de la FK (un aporte colado): la BD rechaza el DELETE con 23000.
+        self::$bd->exec("CREATE TRIGGER tg_forzar_fk_usuario BEFORE DELETE ON usuarios FOR EACH ROW SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = 'Cannot delete or update a parent row'");
+        try {
+            $r = $c->delete("/admin/usuarios/{$u['id']}");
+        } finally {
+            self::$bd->exec('DROP TRIGGER IF EXISTS tg_forzar_fk_usuario');
+        }
+        self::assertSame(409, $r->estado, $r->cuerpo());
+        self::assertSame('conflicto_concurrente', $r->datos['error']['codigo']);
+        self::assertTrue($this->existeUsuario($u['id']));
+        self::assertCount(0, $this->auditoria('borrar_usuario'));
+    }
 }
