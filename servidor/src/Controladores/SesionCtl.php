@@ -14,11 +14,12 @@ use Manual\Seguridad\Csrf;
 use Manual\Seguridad\LimiteIntentos;
 use Manual\Seguridad\Sesion;
 
-/** POST /api/sesion (entrar), GET /api/sesion (actual), DELETE /api/sesion (salir). */
+/** POST /api/sesion (entrar), GET /api/sesion (actual), DELETE /api/sesion (salir), POST /api/sesion/clave (cambiar clave). */
 final class SesionCtl
 {
     public const LARGO_MAX_CORREO = 254;
     public const LARGO_MAX_CLAVE = 1024;
+    public const LARGO_MIN_CLAVE_NUEVA = 10;
 
     public function __construct(
         private readonly Sesion $sesion,
@@ -81,8 +82,62 @@ final class SesionCtl
 
     public function actual(Peticion $p): Respuesta
     {
-        $u = $this->sesion->exigirRol();
+        $u = $this->sesion->exigirSesion();
         return Respuesta::json(200, ['usuario' => $u, 'csrf' => $this->sesion->tokenCsrf()]);
+    }
+
+    /**
+     * POST /api/sesion/clave {actual, nueva}: la persona define su propia clave. Es la única acción
+     * permitida con clave provisoria. Verificar la clave actual pasa por el mismo límite de intentos
+     * que el login. Al terminar, la sesión se reabre con id y csrf nuevos; las otras sesiones de la
+     * cuenta caen porque la huella de la clave cambió.
+     */
+    public function cambiarClave(Peticion $p): Respuesta
+    {
+        $u = $this->sesion->exigirSesion();
+        $e = $p->json();
+        $actual = $e['actual'] ?? null;
+        $nueva = $e['nueva'] ?? null;
+        $campos = [];
+        if (!is_string($actual) || $actual === '' || strlen($actual) > self::LARGO_MAX_CLAVE) {
+            $campos['actual'] = 'Obligatoria.';
+        }
+        if (!is_string($nueva) || mb_strlen($nueva) < self::LARGO_MIN_CLAVE_NUEVA || strlen($nueva) > self::LARGO_MAX_CLAVE) {
+            $campos['nueva'] = 'Debe tener al menos ' . self::LARGO_MIN_CLAVE_NUEVA . ' caracteres.';
+        } elseif (trim($nueva) !== $nueva) {
+            $campos['nueva'] = 'No puede empezar ni terminar con espacios.';
+        } elseif ($nueva === $actual) {
+            $campos['nueva'] = 'Debe ser distinta de la clave actual.';
+        }
+        if ($campos !== []) {
+            throw new ErrorHttp(400, 'entrada_invalida', 'Revise los datos de la clave.', $campos);
+        }
+
+        $claves = ['ip:' . $p->ip, 'cuenta:u' . $u['id']];
+        $espera = $this->limite->reservar($claves);
+        foreach ($this->limite->bloqueadasAlReservar as $bloqueada) {
+            $this->auditoria->registrar(null, 'bloqueo_login', 'intentos_login', null, ['clave' => $bloqueada]);
+        }
+        if ($espera > 0) {
+            return Respuesta::error(429, 'demasiados_intentos', 'Demasiados intentos. Espere antes de volver a intentar.', [], ['Retry-After' => (string) $espera]);
+        }
+
+        $fila = $this->usuarios->porId($u['id']);
+        if ($fila === null || !Claves::verificar($actual, $fila['clave_hash'])) {
+            $this->auditoria->registrar($u['id'], 'cambio_clave_fallido', 'usuario', $u['id'], ['ip' => $p->ip]);
+            foreach ($this->limite->confirmarFallo($claves) as $bloqueada) {
+                $this->auditoria->registrar(null, 'bloqueo_login', 'intentos_login', null, ['clave' => $bloqueada]);
+            }
+            throw new ErrorHttp(400, 'clave_actual_incorrecta', 'La clave actual no es correcta.', ['actual' => 'No es correcta.']);
+        }
+        $this->limite->confirmarExito($claves);
+
+        $hash = Claves::hash($nueva);
+        $this->usuarios->cambiarClave($u['id'], $hash, false);
+        $csrf = Csrf::generar();
+        $this->sesion->iniciar($u['id'], $hash, $csrf);
+        $this->auditoria->registrar($u['id'], 'cambio_clave', 'usuario', $u['id'], ['ip' => $p->ip, 'eraProvisoria' => $u['debeCambiarClave']]);
+        return Respuesta::json(200, ['usuario' => array_replace($u, ['debeCambiarClave' => false]), 'csrf' => $csrf]);
     }
 
     public function salir(Peticion $p): Respuesta

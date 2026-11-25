@@ -89,6 +89,7 @@ final class Aplicacion
         $this->ruta('POST', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->entrar($p), exentoCsrf: true);
         $this->ruta('GET', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->actual($p));
         $this->ruta('DELETE', '/api/sesion', fn (Peticion $p) => $this->sesionCtl()->salir($p));
+        $this->ruta('POST', '/api/sesion/clave', fn (Peticion $p) => $this->sesionCtl()->cambiarClave($p));
 
         $this->ruta('GET', '/api/consulta', fn (Peticion $p) => $this->consultaCtl()->ver($p));
 

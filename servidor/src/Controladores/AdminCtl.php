@@ -81,7 +81,7 @@ final class AdminCtl
             throw new ErrorHttp(404, 'no_encontrado', 'Usuario no encontrado.');
         }
         $clave = Claves::generar();
-        $this->usuarios->cambiarClave($id, Claves::hash($clave));
+        $this->usuarios->cambiarClave($id, Claves::hash($clave), true);
         $this->auditoria->registrar($admin['id'], 'regenerar_clave', 'usuario', $id);
         return Respuesta::json(200, ['clave' => $clave]);
     }

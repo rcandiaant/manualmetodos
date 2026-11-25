@@ -57,7 +57,7 @@ final class Sesion
         return is_string($t) ? $t : null;
     }
 
-    /** @return array{id:int,nombre:string,laboratorio:string,roles:list<string>}|null */
+    /** @return array{id:int,nombre:string,laboratorio:string,roles:list<string>,debeCambiarClave:bool}|null */
     public function usuarioActual(): ?array
     {
         $datos = $this->datos();
@@ -82,14 +82,28 @@ final class Sesion
     }
 
     /**
-     * Exige sesión y, si se indican roles, al menos uno de ellos.
-     * @return array{id:int,nombre:string,laboratorio:string,roles:list<string>}
+     * Exige sesión, aunque la clave sea provisoria. Solo para ver la sesión y cambiar la clave:
+     * todo lo demás pasa por exigirRol().
+     * @return array{id:int,nombre:string,laboratorio:string,roles:list<string>,debeCambiarClave:bool}
      */
-    public function exigirRol(string ...$roles): array
+    public function exigirSesion(): array
     {
         $u = $this->usuarioActual();
         if ($u === null) {
             throw new ErrorHttp(401, 'sin_sesion', 'Debe iniciar sesión.');
+        }
+        return $u;
+    }
+
+    /**
+     * Exige sesión con clave propia (no provisoria) y, si se indican roles, al menos uno de ellos.
+     * @return array{id:int,nombre:string,laboratorio:string,roles:list<string>,debeCambiarClave:bool}
+     */
+    public function exigirRol(string ...$roles): array
+    {
+        $u = $this->exigirSesion();
+        if ($u['debeCambiarClave']) {
+            throw new ErrorHttp(403, 'cambio_clave_requerido', 'Debe definir una clave propia antes de continuar.');
         }
         if ($roles !== [] && array_intersect($roles, $u['roles']) === []) {
             throw new ErrorHttp(403, 'sin_permiso', 'No tiene permiso para esta acción.');
