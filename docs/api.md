@@ -33,7 +33,7 @@ Este documento es el contrato entre el servidor PHP (`servidor/`) y el cliente (
 | 409 | `etapa_no_permite` | escritura fuera de su etapa (ver §3) |
 | 409 | `version_obsoleta` | `PUT …/copia` o `POST …/comentarios` con un `versionId` que ya no es la base vigente (p. ej. el admin reemplazó el texto del capítulo durante la consulta) |
 | 409 | `conflicto_concurrente` | interbloqueo o espera de bloqueo agotada en la base (subida o borrado de capítulo, guardado de copia o comentario mientras se reemplaza el capítulo), o un borrado de capítulo que la base rechaza por un aporte recién creado. Se puede reintentar |
-| 409 | `operacion_no_permitida` | un admin intenta desactivarse o quitarse el rol `admin` a sí mismo, o borrar un capítulo que ya tiene aportes, o reemplazar el texto de un capítulo que ya tiene aportes (§4.6) |
+| 409 | `operacion_no_permitida` | un admin intenta desactivarse, quitarse el rol `admin` o borrar su propia cuenta, o borrar una cuenta con aportes, o borrar un capítulo que ya tiene aportes, o reemplazar el texto de un capítulo que ya tiene aportes (§4.6) |
 | 413 | `cuerpo_muy_grande` | el cuerpo supera el tope de la ruta (§1.4) |
 | 415 | `tipo_no_soportado` | hay cuerpo y `Content-Type` no es `application/json` |
 | 422 | `documento_invalido` | `docJson` o los nodos de una sugerencia no cumplen el esquema del documento |
@@ -208,6 +208,7 @@ Orden de comprobación en los endpoints: rol (401/403), etapa (409), capítulo o
 | `POST /admin/usuarios/importar` | admin | — | 201 `[{correo, clave}]` |
 | `POST /admin/usuarios/{id}/clave` | admin | — | 200 `{clave}` |
 | `PATCH /admin/usuarios/{id}` | admin | — | 200 `{id}` |
+| `DELETE /admin/usuarios/{id}` | admin | — | 204 · 404 · 409 `operacion_no_permitida` si tiene aportes o es la propia cuenta |
 | `PUT /admin/consulta` | admin | — | 200, igual que `GET /consulta` para el admin |
 | `POST /admin/reiniciar` | admin | — | 200 `{respaldo, borrados}` · 400 · 500 `respaldo_fallido`. **Solo existe con `REINICIO_PRUEBAS=1`**; si no, 404 |
 
@@ -391,6 +392,14 @@ Cada comentario: `{id, usuarioId, laboratorio, bloqueId, rango, texto, estado, n
 - Responde 201 `[{"correo": "ana@lab.cl", "clave": "Xy7…"}]`. Las claves (16 caracteres) **se muestran una sola vez** y quedan como **provisorias** (§2.5).
 
 **`POST /admin/usuarios/{id}/clave`** responde 200 `{"clave": "…"}` con una clave regenerada, que queda como **provisoria** (§2.5). Si el usuario no existe, 404. **Cierra todas las sesiones abiertas de esa cuenta** (§2.1).
+
+**`DELETE /admin/usuarios/{id}`** borra una cuenta **solo si no tiene aportes**:
+- Son aportes sus filas en `copias_laboratorio`, `revisiones_copia`, `sugerencias` y `comentarios` (como autora), sus decisiones de revisión (`resuelto_por` en `sugerencias` y `comentarios`) y las versiones de capítulo que subió (`creado_por`). Con cualquiera de ellos responde 409 `operacion_no_permitida` y no cambia nada: hay que **desactivarla** (`PATCH` con `activo: false`) para no perder el registro de la consulta.
+- Un admin no puede borrar su propia cuenta: 409 `operacion_no_permitida`.
+- La comprobación se hace con la fila del usuario bloqueada (`FOR UPDATE`), como en el borrado de capítulos. Si la base rechaza el borrado (interbloqueo, espera agotada o una FK por un aporte recién creado), responde 409 `conflicto_concurrente` y no cambia nada.
+- Borra también sus contadores de `intentos_login`. Sus sesiones abiertas caen en la siguiente petición (401 `sin_sesion`), y el correo queda libre para volver a importarlo.
+- Responde 204 sin cuerpo; si no existe, 404.
+- Queda en auditoría (`borrar_usuario`) con nombre, laboratorio y roles, **sin el correo**.
 
 **`PATCH /admin/usuarios/{id}`** con `{"activo"?: bool, "roles"?: ["laboratorio", …]}`:
 - Hace falta al menos uno de los dos campos; `roles` debe ser una lista no vacía de roles válidos.

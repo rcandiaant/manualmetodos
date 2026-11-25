@@ -86,6 +86,38 @@ final class AdminCtl
         return Respuesta::json(200, ['clave' => $clave]);
     }
 
+    /**
+     * DELETE /admin/usuarios/{id}: borra una cuenta sin aportes (docs/api.md §4.6). Con aportes, 409:
+     * se desactiva en vez de borrarla, para no perder el registro de la consulta. Nadie se borra a sí mismo.
+     * La auditoría guarda nombre, laboratorio y roles, nunca el correo.
+     */
+    public function borrarUsuario(Peticion $p, array $params): Respuesta
+    {
+        $admin = $this->sesion->exigirRol(Rol::ADMIN);
+        $id = (int) $params['id'];
+        if ($id === $admin['id']) {
+            throw new ErrorHttp(409, 'operacion_no_permitida', 'No puede borrar su propia cuenta.');
+        }
+        try {
+            $r = $this->usuarios->borrarSinAportes($id);
+        } catch (\PDOException $ex) {
+            // 40001: interbloqueo. 1205: espera de bloqueo agotada. 23000: una FK rechazó el borrado
+            // (un aporte se coló pese a la comprobación). En todos los casos la transacción se deshizo.
+            if (in_array((string) $ex->getCode(), ['40001', '23000'], true) || (int) ($ex->errorInfo[1] ?? 0) === 1205) {
+                throw new ErrorHttp(409, 'conflicto_concurrente', 'Otra operación sobre la cuenta está en curso. Reintente.');
+            }
+            throw $ex;
+        }
+        if ($r['estado'] === 'no_existe') {
+            throw new ErrorHttp(404, 'no_encontrado', 'Usuario no encontrado.');
+        }
+        if ($r['estado'] === 'con_aportes') {
+            throw new ErrorHttp(409, 'operacion_no_permitida', 'No se puede borrar la cuenta: tiene aportes en la consulta (cambios, comentarios o decisiones). Desactívela en vez de borrarla.');
+        }
+        $this->auditoria->registrar($admin['id'], 'borrar_usuario', 'usuario', $id, $r['usuario']);
+        return Respuesta::vacia();
+    }
+
     public function actualizarUsuario(Peticion $p, array $params): Respuesta
     {
         $admin = $this->sesion->exigirRol(Rol::ADMIN);

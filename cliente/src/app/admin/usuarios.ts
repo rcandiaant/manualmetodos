@@ -1,6 +1,6 @@
 /**
  * Administración de usuarios (`#/admin/usuarios`): lista y filtro, importación de CSV,
- * regeneración de claves, activación y roles (docs/api.md §4.6).
+ * regeneración de claves, activación, roles y borrado de cuentas sin aportes (docs/api.md §4.6).
  *
  * Las claves generadas viven solo en una variable del cierre de la vista: no se escriben
  * en localStorage/sessionStorage y se descartan al ocultarlas o al salir de la vista.
@@ -9,6 +9,7 @@ import { boton, el } from '../../editor/ui';
 import { ErrorApi, type Api } from '../api';
 import { celdaCsv, esEncabezadoUsuarios, lineaVacia } from '../csv';
 import type { Vista } from '../router';
+import { usuarioActual } from '../sesion';
 import type { ClaveRegenerada, CuentaImportada, Rol, UsuarioAdmin, UsuarioCambio } from '../tipos-api';
 import { cabeceraAdmin, cajaError, mensajeError, mostrar } from './comun';
 
@@ -52,6 +53,7 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
   let claves: CuentaImportada[] = [];
   let origenClaves = '';
   let confirmando: number | null = null;
+  let confirmandoBorrar: number | null = null;
 
   const errores = cajaError();
   const erroresCsv = el('div', { class: 'errores-csv error', role: 'alert', hidden: '' });
@@ -153,9 +155,20 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
       boton(u.activo ? 'Desactivar' : 'Activar', () => void cambiar(u, { activo: !u.activo })),
       boton('Regenerar clave', () => {
         confirmando = u.id;
+        confirmandoBorrar = null;
         dibujarLista();
       }),
     );
+    // Nadie borra su propia cuenta (el servidor también lo rechaza).
+    if (u.id !== usuarioActual()?.id) {
+      acciones.append(
+        boton('Borrar', () => {
+          confirmandoBorrar = u.id;
+          confirmando = null;
+          dibujarLista();
+        }),
+      );
+    }
     const celdas: HTMLElement[] = [
       el('td', {}, u.nombre),
       el('td', {}, u.correo),
@@ -178,6 +191,20 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
           boton('Confirmar regeneración', () => void regenerar(u), 'primario'),
           boton('Cancelar', () => {
             confirmando = null;
+            dibujarLista();
+          }),
+        ),
+      );
+    }
+    if (confirmandoBorrar === u.id) {
+      acciones.append(
+        el(
+          'div',
+          { class: 'confirmar', role: 'alert' },
+          `Borrar la cuenta de ${u.nombre} no se puede deshacer. Solo se puede borrar si no tiene aportes en la consulta; si los tiene, desactívela. `,
+          boton('Confirmar borrado', () => void borrar(u), 'primario'),
+          boton('Cancelar', () => {
+            confirmandoBorrar = null;
             dibujarLista();
           }),
         ),
@@ -216,6 +243,27 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
           ? 'Un administrador no puede desactivarse ni quitarse el rol admin a sí mismo.'
           : mensajeError(e));
       }
+    })();
+    return listo;
+  }
+
+  async function borrar(u: UsuarioAdmin): Promise<void> {
+    mostrar(errores, null);
+    confirmandoBorrar = null;
+    listo = (async () => {
+      try {
+        await api.del(`/admin/usuarios/${u.id}`);
+        if (!vigente) return;
+        usuarios = usuarios.filter((x) => x.id !== u.id);
+      } catch (e) {
+        if (!vigente) return;
+        if (e instanceof ErrorApi && e.estado === 404) {
+          usuarios = usuarios.filter((x) => x.id !== u.id); // ya no existía
+        } else if (e instanceof ErrorApi && e.codigo === 'operacion_no_permitida') {
+          mostrar(errores, `No se puede borrar la cuenta de ${u.nombre}: tiene aportes en la consulta. Use «Desactivar» para impedir que entre.`);
+        } else mostrar(errores, mensajeError(e));
+      }
+      if (vigente) dibujarLista();
     })();
     return listo;
   }
