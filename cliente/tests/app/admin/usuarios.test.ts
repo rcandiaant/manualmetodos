@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { contarFilas, vistaUsuarios } from '../../../src/app/admin/usuarios';
 import { crearApi } from '../../../src/app/api';
 import { separadorCsv } from '../../../src/app/csv';
+import { entrar, salir } from '../../../src/app/sesion';
 import type { UsuarioAdmin } from '../../../src/app/tipos-api';
 import { error, fetchSimulado, json } from '../ayudas';
 
@@ -261,5 +262,51 @@ describe('admin: usuarios', () => {
     boton(raiz, 'Confirmar regeneración').click();
     await vista.listo;
     expect(fila().textContent).toContain('Clave provisoria sin cambiar');
+  });
+
+  it('borrar pide confirmación y quita la cuenta de la lista', async () => {
+    const { raiz, vista, f } = await montar(new Response(null, { status: 204 }));
+    const fila = () => [...raiz.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('Ana Pérez'));
+    (([...fila()!.querySelectorAll('button')].find((b) => b.textContent === 'Borrar')) as HTMLButtonElement).click();
+    expect(raiz.textContent).toContain('no se puede deshacer');
+    expect(f.llamadas).toHaveLength(1); // aún no se borra nada
+    boton(raiz, 'Confirmar borrado').click();
+    await vista.listo;
+    expect(f.llamadas[1].url).toBe('/api/admin/usuarios/2');
+    expect(f.llamadas[1].init.method).toBe('DELETE');
+    expect(fila()).toBeUndefined();
+    expect(raiz.querySelectorAll('tbody tr')).toHaveLength(1);
+  });
+
+  it('cancelar el borrado no llama al servidor', async () => {
+    const { raiz, f } = await montar();
+    const fila = raiz.querySelectorAll('tbody tr')[1];
+    ([...fila.querySelectorAll('button')].find((b) => b.textContent === 'Borrar') as HTMLButtonElement).click();
+    boton(raiz, 'Cancelar').click();
+    expect(raiz.textContent).not.toContain('no se puede deshacer');
+    expect(f.llamadas).toHaveLength(1);
+  });
+
+  it('con aportes, avisa y sugiere desactivar sin quitarla de la lista', async () => {
+    const { raiz, vista } = await montar(error(409, 'operacion_no_permitida'));
+    const fila = () => [...raiz.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('Ana Pérez'));
+    ([...fila()!.querySelectorAll('button')].find((b) => b.textContent === 'Borrar') as HTMLButtonElement).click();
+    boton(raiz, 'Confirmar borrado').click();
+    await vista.listo;
+    expect(raiz.querySelector('.error')?.textContent).toContain('tiene aportes');
+    expect(raiz.querySelector('.error')?.textContent).toContain('Desactivar');
+    expect(fila()).toBeDefined();
+  });
+
+  it('la propia cuenta no muestra «Borrar»', async () => {
+    const sim = fetchSimulado(json(200, { usuario: { id: 1, nombre: 'Admin', laboratorio: 'INIA', roles: ['admin'] }, csrf: 't' }));
+    await entrar(crearApi({ fetch: sim.fetch, alSinSesion: () => {} }), 'admin@inia.cl', 'x');
+    try {
+      const { raiz } = await montar();
+      const botones = (texto: string) => [...raiz.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('button')].some((b) => b.textContent === texto));
+      expect(botones('Borrar')).toEqual([false, true]); // Admin (id 1) no; Ana sí
+    } finally {
+      await salir(crearApi({ fetch: fetchSimulado(new Response(null, { status: 204 })).fetch, alSinSesion: () => {} }));
+    }
   });
 });
