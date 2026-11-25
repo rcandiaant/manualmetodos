@@ -98,8 +98,8 @@ trait BaseDePruebas
     /**
      * Crea un usuario y devuelve sus datos con la clave en claro (para ClienteApi::comoUsuario).
      * Usa un Argon2id barato para que las pruebas sean rápidas: la verificación lee el costo del propio hash.
-     * @param array{nombre?:string,correo?:string,laboratorio?:string,clave?:string,roles?:list<string>,activo?:bool} $datos
-     * @return array{id:int,nombre:string,correo:string,laboratorio:string,clave:string,roles:list<string>,activo:bool}
+     * @param array{nombre?:string,correo?:string,laboratorio?:string,clave?:string,roles?:list<string>,activo?:bool,provisoria?:bool} $datos
+     * @return array{id:int,nombre:string,correo:string,laboratorio:string,clave:string,roles:list<string>,activo:bool,provisoria:bool}
      */
     protected function crearUsuario(array $datos = []): array
     {
@@ -112,11 +112,12 @@ trait BaseDePruebas
             'clave' => "Clave-de-prueba-$n",
             'roles' => ['laboratorio'],
             'activo' => true,
+            'provisoria' => false,
         ];
         $hash = password_hash($u['clave'], PASSWORD_ARGON2ID, ['memory_cost' => 1024, 'time_cost' => 1, 'threads' => 1]);
         $config = self::configPruebas();
         $usuarios = new Usuarios(self::$bd, new Cifrado($config->claveCifrado, $config->claveIndice));
-        $u['id'] = $usuarios->crear($u['nombre'], $u['correo'], $u['laboratorio'], $hash, $u['roles'], $u['activo']);
+        $u['id'] = $usuarios->crear($u['nombre'], $u['correo'], $u['laboratorio'], $hash, $u['roles'], $u['activo'], $u['provisoria']);
         return $u;
     }
 }

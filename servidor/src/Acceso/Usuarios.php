@@ -10,10 +10,12 @@ use Manual\Seguridad\Cifrado;
 /**
  * Acceso a usuarios. El correo se guarda cifrado (correo_cifrado) y se busca por índice ciego (correo_indice).
  * Las filas internas incluyen clave_hash: nunca salen de la API; para eso está dto().
+ * clave_provisoria: la clave la entregó el administrador (importación o regeneración) y la persona debe
+ * definir una propia antes de usar la plataforma.
  */
 final class Usuarios
 {
-    private const COLUMNAS = 'id, nombre, laboratorio, clave_hash, roles, activo';
+    private const COLUMNAS = 'id, nombre, laboratorio, clave_hash, clave_provisoria, roles, activo';
 
     public function __construct(private readonly \PDO $bd, private readonly Cifrado $cifrado)
     {
@@ -24,7 +26,7 @@ final class Usuarios
         return $this->cifrado->indice($correo);
     }
 
-    /** @return array{id:int,nombre:string,laboratorio:string,clave_hash:string,roles:list<string>,activo:bool}|null */
+    /** @return array{id:int,nombre:string,laboratorio:string,clave_hash:string,clave_provisoria:bool,roles:list<string>,activo:bool}|null */
     public function porCorreo(string $correo): ?array
     {
         $st = $this->bd->prepare('SELECT ' . self::COLUMNAS . ' FROM usuarios WHERE correo_indice = ?');
@@ -34,7 +36,7 @@ final class Usuarios
         return $fila === false ? null : self::fila($fila);
     }
 
-    /** @return array{id:int,nombre:string,laboratorio:string,clave_hash:string,roles:list<string>,activo:bool}|null */
+    /** @return array{id:int,nombre:string,laboratorio:string,clave_hash:string,clave_provisoria:bool,roles:list<string>,activo:bool}|null */
     public function porId(int $id): ?array
     {
         $st = $this->bd->prepare('SELECT ' . self::COLUMNAS . ' FROM usuarios WHERE id = ?');
@@ -44,32 +46,33 @@ final class Usuarios
     }
 
     /** @param list<string> $roles */
-    public function crear(string $nombre, string $correo, string $laboratorio, string $claveHash, array $roles, bool $activo = true): int
+    public function crear(string $nombre, string $correo, string $laboratorio, string $claveHash, array $roles, bool $activo = true, bool $provisoria = false): int
     {
         if ($roles === [] || array_filter($roles, fn ($r) => !is_string($r) || !Rol::valido($r)) !== []) {
             throw new \InvalidArgumentException('Roles inválidos.');
         }
         $st = $this->bd->prepare(
-            'INSERT INTO usuarios (nombre, laboratorio, correo_cifrado, correo_indice, clave_hash, roles, activo) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO usuarios (nombre, laboratorio, correo_cifrado, correo_indice, clave_hash, clave_provisoria, roles, activo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $st->bindValue(1, $nombre);
         $st->bindValue(2, $laboratorio);
         $st->bindValue(3, $this->cifrado->cifrar(trim($correo)), \PDO::PARAM_LOB);
         $st->bindValue(4, $this->cifrado->indice($correo), \PDO::PARAM_LOB);
         $st->bindValue(5, $claveHash);
-        $st->bindValue(6, implode(',', array_values(array_unique($roles))));
-        $st->bindValue(7, $activo ? 1 : 0, \PDO::PARAM_INT);
+        $st->bindValue(6, $provisoria ? 1 : 0, \PDO::PARAM_INT);
+        $st->bindValue(7, implode(',', array_values(array_unique($roles))));
+        $st->bindValue(8, $activo ? 1 : 0, \PDO::PARAM_INT);
         $st->execute();
         return (int) $this->bd->lastInsertId();
     }
 
     /**
      * Lista para el administrador, con el correo descifrado. Nunca incluye clave_hash.
-     * @return list<array{id:int,nombre:string,laboratorio:string,correo:string,roles:list<string>,activo:bool}>
+     * @return list<array{id:int,nombre:string,laboratorio:string,correo:string,roles:list<string>,activo:bool,clavePendiente:bool}>
      */
     public function listar(): array
     {
-        $filas = $this->bd->query('SELECT id, nombre, laboratorio, correo_cifrado, roles, activo FROM usuarios ORDER BY laboratorio, nombre, id')->fetchAll();
+        $filas = $this->bd->query('SELECT id, nombre, laboratorio, correo_cifrado, clave_provisoria, roles, activo FROM usuarios ORDER BY laboratorio, nombre, id')->fetchAll();
         $salida = [];
         foreach ($filas as $f) {
             $salida[] = [
@@ -79,13 +82,14 @@ final class Usuarios
                 'correo' => $this->cifrado->descifrar((string) $f['correo_cifrado']),
                 'roles' => $f['roles'] === '' ? [] : explode(',', (string) $f['roles']),
                 'activo' => (int) $f['activo'] === 1,
+                'clavePendiente' => (int) $f['clave_provisoria'] === 1,
             ];
         }
         return $salida;
     }
 
     /**
-     * Crea varias cuentas laboratorio en una transacción: o todas o ninguna.
+     * Crea varias cuentas laboratorio, con clave provisoria, en una transacción: o todas o ninguna.
      * @param list<array{nombre:string,correo:string,laboratorio:string,clave_hash:string}> $filas
      * @return list<int> ids creados
      * @throws \PDOException si algún correo ya existe (SQLSTATE 23000); no queda ninguna creada
@@ -96,7 +100,7 @@ final class Usuarios
         try {
             $ids = [];
             foreach ($filas as $f) {
-                $ids[] = $this->crear($f['nombre'], $f['correo'], $f['laboratorio'], $f['clave_hash'], [Rol::LABORATORIO]);
+                $ids[] = $this->crear($f['nombre'], $f['correo'], $f['laboratorio'], $f['clave_hash'], [Rol::LABORATORIO], true, true);
             }
             $this->bd->commit();
             return $ids;
@@ -108,9 +112,10 @@ final class Usuarios
         }
     }
 
-    public function cambiarClave(int $id, string $claveHash): void
+    /** $provisoria: true si la clave la entrega el administrador, false si la eligió la propia persona. */
+    public function cambiarClave(int $id, string $claveHash, bool $provisoria): void
     {
-        $this->bd->prepare('UPDATE usuarios SET clave_hash = ? WHERE id = ?')->execute([$claveHash, $id]);
+        $this->bd->prepare('UPDATE usuarios SET clave_hash = ?, clave_provisoria = ? WHERE id = ?')->execute([$claveHash, $provisoria ? 1 : 0, $id]);
     }
 
     /** @param list<string>|null $roles */
@@ -135,12 +140,12 @@ final class Usuarios
 
     /**
      * DTO público del usuario de la sesión.
-     * @param array{id:int,nombre:string,laboratorio:string,roles:list<string>} $u
-     * @return array{id:int,nombre:string,laboratorio:string,roles:list<string>}
+     * @param array{id:int,nombre:string,laboratorio:string,roles:list<string>,clave_provisoria:bool} $u
+     * @return array{id:int,nombre:string,laboratorio:string,roles:list<string>,debeCambiarClave:bool}
      */
     public static function dto(array $u): array
     {
-        return ['id' => $u['id'], 'nombre' => $u['nombre'], 'laboratorio' => $u['laboratorio'], 'roles' => $u['roles']];
+        return ['id' => $u['id'], 'nombre' => $u['nombre'], 'laboratorio' => $u['laboratorio'], 'roles' => $u['roles'], 'debeCambiarClave' => $u['clave_provisoria']];
     }
 
     /** @param array<string,mixed> $f */
@@ -151,6 +156,7 @@ final class Usuarios
             'nombre' => (string) $f['nombre'],
             'laboratorio' => (string) $f['laboratorio'],
             'clave_hash' => (string) $f['clave_hash'],
+            'clave_provisoria' => (int) $f['clave_provisoria'] === 1,
             'roles' => $f['roles'] === '' ? [] : explode(',', (string) $f['roles']),
             'activo' => (int) $f['activo'] === 1,
         ];

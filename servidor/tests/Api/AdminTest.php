@@ -79,6 +79,7 @@ final class AdminTest extends TestCase
         $n = new ClienteApi($this->app);
         $n->comoUsuario(['correo' => 'ana@lab.cl', 'clave' => $clave]);
         self::assertSame(['laboratorio'], $n->get('/sesion')->datos['usuario']['roles']);
+        self::assertTrue($n->get('/sesion')->datos['usuario']['debeCambiarClave'], 'la clave importada es provisoria');
 
         // Listado con correo descifrado; sin claves ni hashes
         $l = $c->get('/admin/usuarios');
@@ -90,8 +91,9 @@ final class AdminTest extends TestCase
         self::assertStringNotContainsString('clave_hash', $l->cuerpo());
         self::assertStringNotContainsString('argon2', $l->cuerpo());
         $fila = array_values(array_filter($l->datos, fn ($u) => $u['correo'] === 'ana@lab.cl'))[0];
-        self::assertSame(['id', 'nombre', 'laboratorio', 'correo', 'roles', 'activo'], array_keys($fila));
+        self::assertSame(['id', 'nombre', 'laboratorio', 'correo', 'roles', 'activo', 'clavePendiente'], array_keys($fila));
         self::assertTrue($fila['activo']);
+        self::assertTrue($fila['clavePendiente']);
 
         // Auditoría sin secretos
         $aud = $this->auditoria('importar_usuarios');
@@ -311,6 +313,7 @@ final class AdminTest extends TestCase
         self::assertSame(401, $malo->post('/sesion', ['correo' => 'lab@lab.cl', 'clave' => $u['clave']])->estado);
         $ok = new ClienteApi($this->app);
         self::assertSame(200, $ok->post('/sesion', ['correo' => 'lab@lab.cl', 'clave' => $nueva])->estado);
+        self::assertTrue($ok->get('/sesion')->datos['usuario']['debeCambiarClave'], 'la clave regenerada es provisoria');
 
         $aud = $this->auditoria('regenerar_clave');
         self::assertCount(1, $aud);

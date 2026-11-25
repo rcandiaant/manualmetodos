@@ -163,4 +163,11 @@ describe('salir con borradores sin enviar', () => {
     botonTexto(raiz, 'Salir')!.click();
     expect(salir).toHaveBeenCalledTimes(1);
   });
+
+  it('enlaza «Cambiar mi clave» para cualquier rol', async () => {
+    for (const roles of [['laboratorio'], ['revisor'], ['admin']] as Usuario['roles'][]) {
+      const raiz = await montar(usuario(roles), consulta(), CAPS);
+      expect(enlaces(raiz)).toContain('#/clave');
+    }
+  });
 });

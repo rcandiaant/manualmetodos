@@ -161,7 +161,12 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
       el('td', {}, u.correo),
       el('td', {}, u.laboratorio),
       el('td', {}, roles),
-      el('td', { class: u.activo ? '' : 'inactivo' }, u.activo ? 'Activo' : 'Inactivo'),
+      el(
+        'td',
+        { class: u.activo ? '' : 'inactivo' },
+        u.activo ? 'Activo' : 'Inactivo',
+        u.clavePendiente ? el('div', { class: 'ayuda' }, 'Clave provisoria sin cambiar') : '',
+      ),
       el('td', {}, acciones),
     ];
     if (confirmando === u.id) {
@@ -222,6 +227,7 @@ export function vistaUsuarios(api: Api): VistaUsuarios {
       try {
         const r = await api.post<ClaveRegenerada>(`/admin/usuarios/${u.id}/clave`);
         if (!vigente) return;
+        u.clavePendiente = true;
         agregarClaves([{ correo: u.correo, clave: r.clave }], `Nueva clave de ${u.nombre}`);
         dibujarClaves();
       } catch (e) {

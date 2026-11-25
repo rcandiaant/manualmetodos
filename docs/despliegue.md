@@ -129,6 +129,8 @@ La plataforma nunca necesita crear ni borrar tablas. La importación del paso 4 
 
 Aunque la base diga `latin1`, es normal y no hay que convertirla: cada tabla declara su propio `utf8mb4`. Si por error importa el archivo dos veces, no pasa nada.
 
+El `.sql` del paquete ya trae todas las migraciones en orden (`001_inicial.sql`, `002_clave_provisoria.sql`, …). Si importa los archivos sueltos de `migraciones/`, impórtelos todos, en orden.
+
 ## 5. Crear el `.env` con las claves
 
 El `.env` guarda la conexión a la base y dos claves de cifrado. **Nunca viaja en el paquete:** se crea a mano en el servidor.
@@ -261,9 +263,9 @@ Como el hosting no tiene SSH, el comando se ejecuta **una sola vez** con un Cron
 8. **Borre `admin-inicial.txt` de forma definitiva.** En el Administrador de archivos, selecciónelo → **Eliminar** → marque **Omitir la papelera y eliminar permanentemente los archivos** (*Skip the trash*) → **Confirmar**. Si lo borró sin marcar esa opción, abra **Ver papelera** (*View Trash*) y pulse **Vaciar papelera** (*Empty Trash*).
 9. **Cambie la clave en el primer ingreso.** La clave estuvo unos minutos escrita en el servidor, así que hay que reemplazarla:
    1. Entre a `https://manual.renalasch.cl/` con el correo y la clave del archivo.
-   2. Abra **Administración → Usuarios**, busque su propia fila y pulse **Regenerar clave** → **Confirmar regeneración**.
-   3. Copie la **clave nueva** que aparece en la pantalla y reemplace la anterior en su gestor de contraseñas. Se muestra solo esta vez.
-   4. La plataforma cierra todas las sesiones de esa cuenta, incluida la suya: en la siguiente acción le pedirá entrar de nuevo. Entre con la clave nueva.
+   2. En el inicio, pulse **Cambiar mi clave**. Escriba la clave del archivo y luego dos veces una clave nueva, de al menos 10 caracteres, y pulse **Guardar clave**.
+   3. Guarde la clave nueva en su gestor de contraseñas. La plataforma cierra las demás sesiones de esa cuenta; la suya sigue abierta.
+   4. **No use Regenerar clave sobre su propia cuenta:** la clave regenerada queda como provisoria (`docs/api.md` §2.5), y la plataforma le pediría definir otra de inmediato.
 
    Desde ese momento, la clave que quedó en el archivo ya no sirve.
 
@@ -381,7 +383,7 @@ Hágalo en un horario tranquilo: entre los puntos 4 y 6 el sitio queda fuera de 
 6. Revise PHP:
    - En **MultiPHP Manager**, vuelva a aplicar la versión de PHP del subdominio (paso 6.1). cPanel a veces guarda la versión dentro de `public/.htaccess`, y ese archivo acaba de reemplazarse. Con **Select PHP Version** basta confirmar que siga elegida la versión 8.2 o superior.
    - En **MultiPHP INI Editor** (o **Select PHP Version → Options**), confirme que los cuatro límites del paso 6.1 siguen con sus valores. Si alguno volvió al valor del hosting, corríjalo.
-7. Si la versión trae un `.sql`, impórtelo como en el paso 4 **solo si las notas de la versión lo piden**.
+7. Si la versión trae un `.sql`, impórtelo como en el paso 4 **solo si las notas de la versión lo piden** (ver 10.3). Si las notas dicen que se importa **antes**, ya lo hizo en el punto 1.
 8. Repita la prueba rápida (paso 9).
 9. Si todo funciona, borre la carpeta `/home/USUARIO/nueva` y el `.zip`. Deje las carpetas `…-anterior` hasta la próxima actualización: no estorban y permiten volver atrás.
 
@@ -421,6 +423,15 @@ Si la prueba rápida falla con la versión nueva y no hay una solución inmediat
 > - **4.** Confirme la versión y los límites en **Select PHP Version → Options** (renalasch.cl). Con MultiPHP: vuelva a aplicar la versión en **MultiPHP Manager** y confirme los límites de `.user.ini` en la raíz web.
 
 Cuando el problema esté resuelto, borre las carpetas `…-fallida`.
+
+### 10.3 Notas de versión
+
+**Clave provisoria y cambio de clave (migración `002_clave_provisoria.sql`).**
+- **Importe el `.sql` del paquete justo después del punto 1 de 10.1** (después del respaldo y antes de tocar las carpetas). Agrega una columna que la versión anterior ignora, así que el sitio sigue funcionando mientras tanto. Si en cambio se sube el código nuevo sin la columna, **el login falla** hasta importarla.
+- Al importarlo, todas las cuentas que no son admin quedan con **clave provisoria**: en su próximo ingreso, cada persona debe definir una propia. Los administradores no se marcan. Reimportar el `.sql` no vuelve a marcar a quien ya cambió su clave.
+- Para comprobarlo, en phpMyAdmin → pestaña **SQL**: `SELECT nombre, roles, clave_provisoria FROM usuarios;`. Las cuentas de laboratorio y revisor deben tener `1`, y las de admin, `0`.
+- Si hay que volver a la versión anterior (10.2), **no hace falta restaurar el respaldo**: la versión anterior funciona con la columna nueva.
+- En la prueba rápida (paso 9), entre además con una cuenta de laboratorio de prueba: debe abrirse **Defina su clave**, y después de guardarla, el inicio.
 
 ## 11. Restaurar un respaldo
 

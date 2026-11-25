@@ -10,6 +10,7 @@ const OBLIGATORIOS = [
   'public/index.html',
   'vendor/autoload.php',
   'migraciones/001_inicial.sql',
+  'migraciones/002_clave_provisoria.sql',
 ];
 
 const PAQUETE_VALIDO = [

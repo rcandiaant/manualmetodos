@@ -66,7 +66,7 @@ final class SesionTest extends TestCase
         $r = $this->login($c, '  ana.soto@LAB.cl ', $u['clave']);
 
         $this->assertSame(200, $r->estado, (string) json_encode($r->datos));
-        $this->assertSame(['id' => $u['id'], 'nombre' => 'Ana Soto', 'laboratorio' => 'Lab Suelos', 'roles' => ['laboratorio', 'revisor']], $r->datos['usuario']);
+        $this->assertSame(['id' => $u['id'], 'nombre' => 'Ana Soto', 'laboratorio' => 'Lab Suelos', 'roles' => ['laboratorio', 'revisor'], 'debeCambiarClave' => false], $r->datos['usuario']);
         $this->assertSame(['usuario', 'csrf'], array_keys($r->datos), 'DTO explícito: nada de correo ni hash');
         $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $r->datos['csrf']);
 
@@ -478,5 +478,135 @@ final class SesionTest extends TestCase
         $c = $this->cliente()->comoUsuario($u);
         unset($this->sesiones->sesiones[$c->cookie]['huella']);
         $this->assertError(401, 'sin_sesion', $c->get('/api/sesion'));
+    }
+
+    // --- Clave provisoria y cambio de clave (POST /api/sesion/clave) ---
+
+    private function cambiar(ClienteApi $c, string $actual, string $nueva): Respuesta
+    {
+        return $c->post('/api/sesion/clave', ['actual' => $actual, 'nueva' => $nueva]);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function auditoria(string $accion): array
+    {
+        $st = self::$bd->prepare('SELECT * FROM auditoria WHERE accion = ?');
+        $st->execute([$accion]);
+        return $st->fetchAll();
+    }
+
+    public function test_con_clave_provisoria_solo_puede_ver_la_sesion_cambiar_la_clave_y_salir(): void
+    {
+        $u = $this->crearUsuario(['provisoria' => true, 'roles' => ['laboratorio', 'revisor', 'admin']]);
+        $c = $this->cliente();
+
+        $r = $this->login($c, $u['correo'], $u['clave']);
+        $this->assertSame(200, $r->estado);
+        $this->assertTrue($r->datos['usuario']['debeCambiarClave']);
+        $g = $c->get('/api/sesion');
+        $this->assertSame(200, $g->estado);
+        $this->assertTrue($g->datos['usuario']['debeCambiarClave']);
+
+        // Ni la lectura ni la escritura pasan, tenga los roles que tenga.
+        $this->assertError(403, 'cambio_clave_requerido', $c->get('/api/capitulos'));
+        $this->assertError(403, 'cambio_clave_requerido', $c->get('/api/consulta'));
+        $this->assertError(403, 'cambio_clave_requerido', $c->get('/api/admin/usuarios'));
+        $this->assertError(403, 'cambio_clave_requerido', $c->post('/api/admin/usuarios/importar', ['csv' => 'A,a@lab.cl,L']));
+
+        $this->assertSame(204, $c->delete('/api/sesion')->estado);
+        $this->assertError(401, 'sin_sesion', $c->get('/api/sesion'));
+    }
+
+    public function test_cambiar_la_clave_provisoria_habilita_la_cuenta_y_reabre_la_sesion(): void
+    {
+        $u = $this->crearUsuario(['provisoria' => true]);
+        $c = $this->cliente()->comoUsuario($u);
+        $otra = $this->cliente()->comoUsuario($u);
+        $cookieAntes = $c->cookie;
+        $csrfAntes = $c->csrf;
+
+        $r = $this->cambiar($c, $u['clave'], 'Mi clave nueva 2026');
+
+        $this->assertSame(200, $r->estado, (string) json_encode($r->datos));
+        $this->assertSame(['usuario', 'csrf'], array_keys($r->datos));
+        $this->assertSame(['id', 'nombre', 'laboratorio', 'roles', 'debeCambiarClave'], array_keys($r->datos['usuario']));
+        $this->assertFalse($r->datos['usuario']['debeCambiarClave']);
+        $this->assertNotSame($cookieAntes, $c->cookie, 'id de sesión nuevo');
+        $this->assertNotSame($csrfAntes, $c->csrf, 'csrf nuevo');
+
+        // La misma sesión ya puede usar la plataforma; la otra sesión de la cuenta cayó.
+        $this->assertSame(200, $c->get('/api/capitulos')->estado);
+        $this->assertFalse($c->get('/api/sesion')->datos['usuario']['debeCambiarClave']);
+        $this->assertError(401, 'sin_sesion', $otra->get('/api/sesion'));
+
+        // La clave provisoria deja de servir; la nueva entra sin pedir otro cambio.
+        $this->assertError(401, 'credenciales_invalidas', $this->login($this->cliente(), $u['correo'], $u['clave']));
+        $n = $this->login($this->cliente(), $u['correo'], 'Mi clave nueva 2026');
+        $this->assertSame(200, $n->estado);
+        $this->assertFalse($n->datos['usuario']['debeCambiarClave']);
+
+        $aud = $this->auditoria('cambio_clave');
+        $this->assertCount(1, $aud);
+        $detalle = (string) $aud[0]['detalle'];
+        $this->assertStringNotContainsString($u['clave'], $detalle);
+        $this->assertStringNotContainsString('Mi clave nueva', $detalle);
+        $this->assertTrue(json_decode($detalle, true)['eraProvisoria']);
+    }
+
+    public function test_quien_ya_tiene_clave_propia_tambien_puede_cambiarla(): void
+    {
+        $u = $this->crearUsuario();
+        $c = $this->cliente()->comoUsuario($u);
+        $this->assertSame(200, $this->cambiar($c, $u['clave'], 'Otra clave segura')->estado);
+        $this->assertSame(200, $this->login($this->cliente(), $u['correo'], 'Otra clave segura')->estado);
+        $this->assertFalse(json_decode((string) $this->auditoria('cambio_clave')[0]['detalle'], true)['eraProvisoria']);
+    }
+
+    public function test_cambiar_clave_valida_los_datos_sin_cambiar_nada(): void
+    {
+        $u = $this->crearUsuario(['provisoria' => true]);
+        $c = $this->cliente()->comoUsuario($u);
+
+        $corta = $this->cambiar($c, $u['clave'], 'Corta-123');
+        $this->assertError(400, 'entrada_invalida', $corta);
+        $this->assertArrayHasKey('nueva', $corta->datos['error']['campos']);
+        $this->assertError(400, 'entrada_invalida', $this->cambiar($c, $u['clave'], $u['clave']));
+        $this->assertError(400, 'entrada_invalida', $this->cambiar($c, $u['clave'], ' Con espacio al borde'));
+        $this->assertError(400, 'entrada_invalida', $this->cambiar($c, $u['clave'], str_repeat('x', 1025)));
+        $this->assertError(400, 'entrada_invalida', $c->post('/api/sesion/clave', ['nueva' => 'Una clave valida']));
+        $this->assertError(400, 'entrada_invalida', $c->post('/api/sesion/clave', ['actual' => 5, 'nueva' => 'Una clave valida']));
+
+        $mala = $this->cambiar($c, 'no-es-la-clave', 'Una clave valida');
+        $this->assertError(400, 'clave_actual_incorrecta', $mala);
+        $this->assertArrayHasKey('actual', $mala->datos['error']['campos']);
+        $this->assertCount(1, $this->auditoria('cambio_clave_fallido'));
+
+        // Nada cambió: sigue provisoria, con la misma clave y la misma sesión.
+        $this->assertTrue($c->get('/api/sesion')->datos['usuario']['debeCambiarClave']);
+        $this->assertSame(200, $this->login($this->cliente(), $u['correo'], $u['clave'])->estado);
+    }
+
+    public function test_cambiar_clave_exige_sesion_y_csrf(): void
+    {
+        $this->assertError(401, 'sin_sesion', $this->cambiar($this->cliente(), 'a', 'Una clave valida'));
+        $u = $this->crearUsuario(['provisoria' => true]);
+        $c = $this->cliente()->comoUsuario($u);
+        $r = $c->enviar('POST', '/api/sesion/clave', ['actual' => $u['clave'], 'nueva' => 'Una clave valida'], ['x-csrf-token' => null]);
+        $this->assertError(403, 'csrf_invalido', $r);
+        $this->assertTrue($c->get('/api/sesion')->datos['usuario']['debeCambiarClave']);
+    }
+
+    public function test_probar_claves_actuales_tiene_el_mismo_limite_que_el_login(): void
+    {
+        $u = $this->crearUsuario(['provisoria' => true]);
+        $c = $this->cliente()->comoUsuario($u);
+        for ($i = 0; $i < LimiteIntentos::UMBRAL_CUENTA; $i++) {
+            $this->assertError(400, 'clave_actual_incorrecta', $this->cambiar($c, "mala-$i", 'Una clave valida'));
+        }
+        $this->assertError(429, 'demasiados_intentos', $this->cambiar($c, $u['clave'], 'Una clave valida'));
+        $this->assertTrue($c->get('/api/sesion')->datos['usuario']['debeCambiarClave']);
+
+        $this->reloj->avanzar(LimiteIntentos::BLOQUEOS[0] + 1);
+        $this->assertSame(200, $this->cambiar($c, $u['clave'], 'Una clave valida')->estado);
     }
 }

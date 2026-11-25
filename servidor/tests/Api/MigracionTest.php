@@ -44,9 +44,66 @@ final class MigracionTest extends TestCase
     public function test_migracion_es_idempotente(): void
     {
         $bd = self::recrearBaseVacia();
-        $this->assertSame(['001_inicial.sql'], Migrador::aplicar($bd, self::directorioMigraciones()));
+        $this->assertSame(['001_inicial.sql', '002_clave_provisoria.sql'], Migrador::aplicar($bd, self::directorioMigraciones()));
         $this->assertSame([], Migrador::aplicar($bd, self::directorioMigraciones()));
-        $this->assertSame(1, (int) $bd->query('SELECT COUNT(*) FROM migraciones_aplicadas')->fetchColumn());
+        $this->assertSame(2, (int) $bd->query('SELECT COUNT(*) FROM migraciones_aplicadas')->fetchColumn());
+        self::$bd = $bd;
+    }
+
+    /** Ejecuta un archivo de migraciones/ como lo haría phpMyAdmin (sin pasar por el Migrador). */
+    private static function importarAMano(\PDO $bd, string $archivo): void
+    {
+        $sql = file_get_contents(self::directorioMigraciones() . '/' . $archivo);
+        foreach (Migrador::sentencias($sql) as $s) {
+            $bd->exec($s);
+        }
+    }
+
+    private static function insertarUsuario(\PDO $bd, string $indice, string $roles): int
+    {
+        $bd->prepare('INSERT INTO usuarios (nombre, laboratorio, correo_cifrado, correo_indice, clave_hash, roles) VALUES (?,?,?,?,?,?)')
+            ->execute(['N', 'Lab', 'x', str_pad($indice, 32, "\0"), 'h', $roles]);
+        return (int) $bd->lastInsertId();
+    }
+
+    private static function provisoria(\PDO $bd, int $id): int
+    {
+        $st = $bd->prepare('SELECT clave_provisoria FROM usuarios WHERE id = ?');
+        $st->execute([$id]);
+        return (int) $st->fetchColumn();
+    }
+
+    public function test_002_marca_provisorias_las_cuentas_existentes_salvo_admin(): void
+    {
+        $bd = self::recrearBaseVacia();
+        self::importarAMano($bd, '001_inicial.sql');
+        $lab = self::insertarUsuario($bd, 'l1', 'laboratorio');
+        $rev = self::insertarUsuario($bd, 'r1', 'laboratorio,revisor');
+        $adm = self::insertarUsuario($bd, 'a1', 'laboratorio,admin');
+
+        self::importarAMano($bd, '002_clave_provisoria.sql');
+
+        $this->assertSame(1, self::provisoria($bd, $lab));
+        $this->assertSame(1, self::provisoria($bd, $rev));
+        $this->assertSame(0, self::provisoria($bd, $adm));
+        // Una cuenta creada después parte en 0 (la marca la pone quien entrega la clave).
+        $this->assertSame(0, self::provisoria($bd, self::insertarUsuario($bd, 'n1', 'laboratorio')));
+        self::$bd = $bd;
+    }
+
+    public function test_reimportar_002_no_vuelve_a_marcar_a_quien_ya_cambio_su_clave(): void
+    {
+        $bd = self::recrearBaseVacia();
+        self::importarAMano($bd, '001_inicial.sql');
+        $lab = self::insertarUsuario($bd, 'l1', 'laboratorio');
+        self::importarAMano($bd, '002_clave_provisoria.sql');
+        $bd->prepare('UPDATE usuarios SET clave_provisoria = 0 WHERE id = ?')->execute([$lab]);
+
+        self::importarAMano($bd, '002_clave_provisoria.sql');
+        self::importarAMano($bd, '001_inicial.sql');
+
+        $this->assertSame(0, self::provisoria($bd, $lab));
+        $this->assertSame([], Migrador::aplicar($bd, self::directorioMigraciones()));
         self::$bd = $bd;
     }
 
