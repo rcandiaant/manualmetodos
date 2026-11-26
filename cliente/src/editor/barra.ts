@@ -13,6 +13,9 @@
  *   `formulas.ts`; clic en una fórmula existente la edita. Nada de esto ocurre en solo lectura.
  *
  * "Comentar" (Task 5) se agrega después con `agregar`.
+ *
+ * Presentación: íconos de `iconos.ts` (el nombre queda en texto oculto) y tooltip propio
+ * (`data-tip`) con lo que hace cada botón; las marcas y los símbolos se muestran como letras.
  * Los bloques creados aquí llevan `bid: null` (R27): son bloques nuevos.
  */
 import { Editor, Extension, Node, type Extensions } from '@tiptap/core';
@@ -24,6 +27,7 @@ import type { DocJSON } from '../tipos';
 import { textoVisible } from './decoraciones';
 import { alPulsarEnter, BloquesNuevos } from './editor';
 import { abrirEditorFormula, editarFormula, formulaEnDOM } from './formulas';
+import { ponerIcono, ponerTooltip, type NombreIcono } from './iconos';
 import { boton, el } from './ui';
 
 export const SIMBOLOS = ['°', '±', '≤', '≥', 'µ', '·', '×', '→'] as const;
@@ -291,10 +295,12 @@ export function crearBarra(ed: Editor): Barra {
     elemento.append(g);
     return g;
   };
-  const accion = (texto: string, fn: () => unknown, titulo?: string, clase = '') => {
+  const accion = (texto: string, fn: () => unknown, titulo?: string, clase = '', ic?: NombreIcono) => {
     const b = boton(texto, () => {
       if (habilitada) fn();
-    }, clase, titulo);
+    }, clase);
+    if (ic) ponerIcono(b, ic);
+    ponerTooltip(b, titulo ?? texto);
     b.addEventListener('mousedown', (ev) => ev.preventDefault()); // conserva la selección
     botones.push(b);
     return b;
@@ -312,20 +318,20 @@ export function crearBarra(ed: Editor): Barra {
   // Listas
   grupo(
     'Listas',
-    accion('Lista numerada', () => ed.chain().focus().toggleList('listaOrdenada', 'item').run()),
-    accion('Lista con viñetas', () => ed.chain().focus().toggleList('listaVinetas', 'item').run()),
-    accion('Aumentar sangría', () => ed.chain().focus().sinkListItem('item').run(), 'Anidar el ítem en el anterior'),
-    accion('Reducir sangría', () => ed.chain().focus().liftListItem('item').run(), 'Sacar el ítem un nivel'),
+    accion('Lista numerada', () => ed.chain().focus().toggleList('listaOrdenada', 'item').run(), undefined, '', 'listaNumerada'),
+    accion('Lista con viñetas', () => ed.chain().focus().toggleList('listaVinetas', 'item').run(), undefined, '', 'listaVinetas'),
+    accion('Aumentar sangría', () => ed.chain().focus().sinkListItem('item').run(), 'Aumentar sangría: anidar el ítem en el anterior', '', 'aumentarSangria'),
+    accion('Reducir sangría', () => ed.chain().focus().liftListItem('item').run(), 'Reducir sangría: sacar el ítem un nivel', '', 'reducirSangria'),
   );
 
   // Tabla
   grupo(
     'Tabla',
-    accion('Insertar tabla', () => comandosTabla.insertar(ed)),
-    accion('Agregar fila', () => comandosTabla.agregarFila(ed)),
-    accion('Quitar fila', () => comandosTabla.quitarFila(ed)),
-    accion('Agregar columna', () => comandosTabla.agregarColumna(ed)),
-    accion('Quitar columna', () => comandosTabla.quitarColumna(ed)),
+    accion('Insertar tabla', () => comandosTabla.insertar(ed), undefined, '', 'tabla'),
+    accion('Agregar fila', () => comandosTabla.agregarFila(ed), undefined, '', 'agregarFila'),
+    accion('Quitar fila', () => comandosTabla.quitarFila(ed), undefined, '', 'quitarFila'),
+    accion('Agregar columna', () => comandosTabla.agregarColumna(ed), undefined, '', 'agregarColumna'),
+    accion('Quitar columna', () => comandosTabla.quitarColumna(ed), undefined, '', 'quitarColumna'),
   );
 
   // Símbolos
@@ -359,7 +365,7 @@ export function crearBarra(ed: Editor): Barra {
     });
     grupoRef.append(listaRefs);
     listaRefs.querySelector('button')?.focus();
-  });
+  }, 'Referenciar ítem: insertar una referencia a un ítem con etiqueta', '', 'referencia');
   const grupoRef = grupo('Referencias', botonRef);
   grupoRef.classList.add('grupo-referencias');
 
@@ -426,7 +432,7 @@ export function crearBarra(ed: Editor): Barra {
         .insertContent({ type: 'notaPie', attrs: { bloques: [PARRAFO_VACIO] } })
         .run();
       if (ok) abrirNota(pos);
-    }),
+    }, 'Insertar una nota al pie', '', 'notaPie'),
   );
 
   // Fórmulas: un diálogo a la vez; pasar a solo lectura o destruir la barra lo cierra (cancela).
@@ -464,8 +470,8 @@ export function crearBarra(ed: Editor): Barra {
     });
   grupo(
     'Fórmulas',
-    accion('Fórmula', () => void insertarFormula(false), 'Insertar una fórmula en la línea'),
-    accion('Ecuación', () => void insertarFormula(true), 'Insertar una ecuación en bloque'),
+    accion('Fórmula', () => void insertarFormula(false), 'Fórmula: insertar una fórmula en la línea', '', 'formula'),
+    accion('Ecuación', () => void insertarFormula(true), 'Ecuación: insertar una ecuación en bloque', '', 'ecuacion'),
   );
 
   // Clic en una nota o una fórmula existente: la nota se abre en el panel, la fórmula en el diálogo.
@@ -496,6 +502,8 @@ export function crearBarra(ed: Editor): Barra {
     abrirNota,
     cerrarNota,
     agregar(b) {
+      const titulo = b.getAttribute('title');
+      if (titulo) ponerTooltip(b, titulo);
       botones.push(b);
       b.disabled = !habilitada;
       grupo('Otros', b);

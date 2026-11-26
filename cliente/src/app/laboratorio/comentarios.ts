@@ -35,6 +35,7 @@ import { bidDe, esBloque } from '../../cambios/sugerencias';
 import { tokenizarBloque, tokensANodos } from '../../cambios/tokens';
 import { posicionEnDoc, textoVisible, ubicarBloque } from '../../editor/decoraciones';
 import { boton, el, mensajeDe } from '../../editor/ui';
+import { ponerIcono } from '../../editor/iconos';
 import type { DocJSON, Rango } from '../../tipos';
 import { ErrorApi, type Api } from '../api';
 import { formatearFecha } from '../inicio';
@@ -218,6 +219,7 @@ export function crearComentarios(op: OpcionesComentarios): Comentarios {
   /* ---------- Botón y aviso ---------- */
 
   const botonComentar = boton('Comentar', () => comentar(), 'boton-comentar', 'Comentar el texto seleccionado');
+  ponerIcono(botonComentar, 'comentar', true);
   botonComentar.addEventListener('mousedown', (ev) => ev.preventDefault()); // conserva la selección
   const aviso = el('div', { class: 'aviso aviso-comentar', role: 'alert' });
   aviso.hidden = true;

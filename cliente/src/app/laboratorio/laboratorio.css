@@ -31,12 +31,50 @@
   position: sticky; top: 0; z-index: 2; background: var(--fondo);
   box-shadow: 0 6px 6px -6px rgba(0, 0, 0, 0.18);
 }
-.barra-lab { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 6px 0; }
-.barra-grupo { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.barra-lab button { padding: 4px 8px; }
-.barra-lab button:disabled { opacity: 0.5; cursor: not-allowed; }
-.barra-lab button.simbolo { min-width: 2rem; font-family: Georgia, serif; }
-.barra-lab button.marca-subindice, .barra-lab button.marca-superindice { font-family: Georgia, serif; }
+/* Estilo procesador de texto: botones cuadrados sin borde, grupos separados por una línea fina.
+   Cada grupo lleva su línea a la izquierda, 1 px fuera de su caja (margin-left: -1px); el
+   clip-path recorta solo el borde izquierdo de la barra, así que la línea de un grupo que
+   empieza fila no se ve (sin recortar tooltips ni el menú de referencias, que van hacia abajo). */
+.barra-lab {
+  display: flex; flex-wrap: wrap; gap: 4px 0; align-items: center; padding: 6px 0; margin-left: -8px;
+  clip-path: inset(-100vh -100vw -100vh 0);
+}
+.barra-grupo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 0 8px;
+  margin-left: -1px; border-left: 1px solid var(--borde);
+}
+.barra-grupo > button {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-width: 32px; height: 32px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--tinta); line-height: 1;
+}
+.barra-grupo > button:hover:not(:disabled) { background: rgba(0, 0, 0, 0.06); }
+.barra-grupo > button:active:not(:disabled) { background: rgba(0, 0, 0, 0.11); }
+.barra-grupo > button[aria-pressed='true'] { background: rgba(0, 0, 0, 0.1); border-color: var(--borde); color: var(--acento); }
+.barra-grupo > button:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.barra-grupo > button:disabled { opacity: 0.4; cursor: not-allowed; }
+.barra-grupo > button .icono { flex: none; }
+.barra-grupo > button.marca { font-family: Georgia, serif; font-size: 1rem; }
+.barra-grupo > button.marca-negrita { font-weight: 700; }
+.barra-grupo > button.marca-cursiva { font-style: italic; }
+.barra-grupo > button.simbolo { min-width: 28px; padding: 0 4px; font-family: Georgia, serif; font-size: 0.95rem; }
+.barra-grupo > button.con-icono { padding: 0 10px; border-color: var(--borde); }
+.barra-grupo > button.con-icono .etiqueta-boton { font-size: 0.85rem; }
+
+/* Tooltip propio: aparece al pasar el mouse o al llegar con Tab, bajo el botón y hacia la
+   derecha (hacia la izquierda lo cortaría el clip-path de la barra). */
+.barra-lab [data-tip]::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 0; z-index: 4;
+  transform: translateY(-2px); width: max-content; max-width: 16rem;
+  padding: 5px 8px; border-radius: 5px; background: #2b2b2b; color: #fff;
+  font: 500 0.75rem/1.3 system-ui, sans-serif; font-style: normal; white-space: normal; text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18); pointer-events: none;
+  opacity: 0; visibility: hidden; transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.barra-lab [data-tip]:hover::after, .barra-lab [data-tip]:focus-visible::after {
+  opacity: 1; visibility: visible; transform: none; transition-delay: 0.15s;
+}
+@media (hover: none) { .barra-lab [data-tip]::after { display: none; } }
 .grupo-referencias { position: relative; }
 .lista-referencias {
   position: absolute; top: 100%; left: 0; z-index: 3; min-width: 18rem; max-height: 18rem; overflow: auto;

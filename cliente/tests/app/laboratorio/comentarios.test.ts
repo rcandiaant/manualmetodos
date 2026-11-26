@@ -41,6 +41,17 @@ afterEach(async () => {
 });
 
 describe('comentarios del laboratorio', () => {
+  it('«Comentar» va en la barra con ícono, texto visible y tooltip', async () => {
+    const { vista, raiz } = montar({ base: BASE });
+    await vista.listo;
+    const b = botonTexto(raiz, 'Comentar')!;
+    expect(b.closest('.barra-lab')).not.toBeNull();
+    expect(b.querySelector('svg.icono')).not.toBeNull();
+    expect(b.querySelector('.etiqueta-boton')?.textContent).toBe('Comentar');
+    expect(b.dataset.tip).toBe('Comentar el texto seleccionado');
+    expect(b.hasAttribute('title')).toBe(false);
+  });
+
   it('comentar seleccion envia bloqueId y rango', async () => {
     const { vista, raiz, llamadas } = montar({ base: BASE });
     await vista.listo;

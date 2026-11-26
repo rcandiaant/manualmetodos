@@ -509,6 +509,22 @@ describe('barra', () => {
     expect(botonTexto(barra.elemento, 'x₂')!.getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('íconos y tooltips: cada botón tiene su explicación; el nombre queda para lectores de pantalla', () => {
+    const { barra } = editorCon(doc(parrafo('p1', 'Hola')));
+    const botones = [...barra.elemento.querySelectorAll<HTMLButtonElement>('.barra-grupo > button')];
+    expect(botones.length).toBeGreaterThan(15);
+    for (const b of botones) {
+      expect(b.dataset.tip, b.textContent!).toBeTruthy();
+      expect(b.hasAttribute('title')).toBe(false); // sin el tooltip nativo duplicado
+    }
+    const tabla = botonTexto(barra.elemento, 'Insertar tabla')!;
+    expect(tabla.querySelector('svg.icono')?.getAttribute('aria-hidden')).toBe('true');
+    expect(tabla.querySelector('.oculto')?.textContent).toBe('Insertar tabla');
+    expect(botonTexto(barra.elemento, 'Aumentar sangría')!.dataset.tip).toContain('anidar el ítem');
+    expect(botonTexto(barra.elemento, 'N')!.dataset.tip).toBe('Negrita (Ctrl+B)');
+    expect(botonTexto(barra.elemento, 'N')!.querySelector('svg')).toBeNull(); // las marcas siguen como letras
+  });
+
   it('negrita y cursiva', () => {
     const { ed, barra } = editorCon(doc(parrafo('p1', 'Hola mundo')));
     const p = posDe(ed, 'Hola');
