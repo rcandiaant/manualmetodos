@@ -1,4 +1,5 @@
 import { Editor } from '@tiptap/core';
+import { undo } from '@tiptap/pm/history';
 import { NodeSelection } from '@tiptap/pm/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { crearApi } from '../../../src/app/api';
@@ -295,6 +296,59 @@ describe('vista del capítulo (laboratorio)', () => {
   });
 });
 
+describe('deshacer un cambio desde «Mis cambios»', () => {
+  const DOS_CAMBIOS = doc(parrafo('p1', 'Uno más.'), parrafo('p2', 'Dos otra vez.'));
+  const conDosCambios = () => montar({ copia: { docJson: DOS_CAMBIOS, actualizado: '2026-11-03T15:59:50Z', versionId: 7, sugerencias: [] } });
+  const entradas = (raiz: HTMLElement) => [...raiz.querySelectorAll<HTMLLIElement>('.lista-cambios > li')];
+  const entradaCon = (raiz: HTMLElement, t: string) => entradas(raiz).find((li) => li.textContent!.includes(t))!;
+
+  it('pide confirmación, vuelve ese pasaje al original, deja los demás cambios y guarda', async () => {
+    const { vista, raiz, puts } = conDosCambios();
+    await vista.listo;
+    expect(entradas(raiz)).toHaveLength(2);
+    const li = entradaCon(raiz, 'más');
+    botonTexto(li, 'Deshacer este cambio')!.click();
+    expect(li.querySelector<HTMLElement>('.confirmar-deshacer')!.hidden).toBe(false);
+    expect(vista.editor()!.getText()).toContain('Uno más.'); // aún no cambia nada
+    botonTexto(li, 'Confirmar')!.click();
+    const ed = vista.editor()!;
+    expect(ed.getText()).toContain('Uno.');
+    expect(ed.getText()).not.toContain('más');
+    expect(ed.getText()).toContain('Dos otra vez.');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(entradas(raiz)).toHaveLength(1);
+    expect(puts).toHaveLength(1);
+    expect(JSON.stringify(puts[0])).not.toContain('más');
+    // Va al historial: Ctrl+Z lo revierte.
+    expect(undo(ed.state, ed.view.dispatch)).toBe(true);
+    expect(ed.getText()).toContain('Uno más.');
+  });
+
+  it('cancelar no toca el texto', async () => {
+    const { vista, raiz, puts } = conDosCambios();
+    await vista.listo;
+    const li = entradaCon(raiz, 'más');
+    botonTexto(li, 'Deshacer este cambio')!.click();
+    botonTexto(li, 'Cancelar')!.click();
+    expect(li.querySelector<HTMLElement>('.confirmar-deshacer')!.hidden).toBe(true);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(vista.editor()!.getText()).toContain('Uno más.');
+    expect(entradas(raiz)).toHaveLength(2);
+    expect(puts).toHaveLength(0);
+  });
+
+  it('en solo lectura el botón está deshabilitado', async () => {
+    const { vista, raiz } = montar({
+      etapa: 'preparacion',
+      copia: { docJson: DOS_CAMBIOS, actualizado: '2026-11-03T15:59:50Z', versionId: 7, sugerencias: [] },
+    });
+    await vista.listo;
+    const botones = [...raiz.querySelectorAll<HTMLButtonElement>('.deshacer-cambio')];
+    expect(botones.length).toBeGreaterThan(0);
+    expect(botones.every((b) => b.disabled)).toBe(true);
+  });
+});
+
 describe('un solo escritor por usuario y capitulo (I1)', () => {
   const aviso = (raiz: HTMLElement) => raiz.querySelector('.aviso-pestana') as HTMLElement;
 
@@ -453,6 +507,22 @@ describe('barra', () => {
     expect(marcas).toEqual(['superindice']);
     expect(botonTexto(barra.elemento, 'x²')!.getAttribute('aria-pressed')).toBe('true');
     expect(botonTexto(barra.elemento, 'x₂')!.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('íconos y tooltips: cada botón tiene su explicación; el nombre queda para lectores de pantalla', () => {
+    const { barra } = editorCon(doc(parrafo('p1', 'Hola')));
+    const botones = [...barra.elemento.querySelectorAll<HTMLButtonElement>('.barra-grupo > button')];
+    expect(botones.length).toBeGreaterThan(15);
+    for (const b of botones) {
+      expect(b.dataset.tip, b.textContent!).toBeTruthy();
+      expect(b.hasAttribute('title')).toBe(false); // sin el tooltip nativo duplicado
+    }
+    const tabla = botonTexto(barra.elemento, 'Insertar tabla')!;
+    expect(tabla.querySelector('svg.icono')?.getAttribute('aria-hidden')).toBe('true');
+    expect(tabla.querySelector('.oculto')?.textContent).toBe('Insertar tabla');
+    expect(botonTexto(barra.elemento, 'Aumentar sangría')!.dataset.tip).toContain('anidar el ítem');
+    expect(botonTexto(barra.elemento, 'N')!.dataset.tip).toBe('Negrita (Ctrl+B)');
+    expect(botonTexto(barra.elemento, 'N')!.querySelector('svg')).toBeNull(); // las marcas siguen como letras
   });
 
   it('negrita y cursiva', () => {

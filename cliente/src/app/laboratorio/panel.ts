@@ -20,6 +20,9 @@
  *   `role="alert"` y un botón "Reintentar".
  * - `motivoObligatorio`: las unidades sin motivo se marcan y la cabecera dice
  *   "N cambios sin motivo". Nunca bloquea el guardado (principio rector).
+ * - "Deshacer este cambio" (si la vista da `deshacer`): pide confirmación en la página y
+ *   devuelve ese pasaje al texto original; el resto de los cambios queda igual. Un motivo
+ *   escrito pasa a "Motivos sin cambio asociado" (y vuelve si el cambio vuelve, p. ej. con Ctrl+Z).
  *
  * "Mis aportes" (edicion_final): `GET …/mis-aportes` con el estado y la nota de resolución.
  *
@@ -64,6 +67,9 @@ interface VistaUnidad {
   error: HTMLElement;
   mensajeError: HTMLElement;
   reintentar: HTMLButtonElement;
+  deshacer: HTMLButtonElement | null;
+  confirmar: HTMLElement;
+  errorDeshacer: HTMLElement;
 }
 
 export interface OpcionesPanel {
@@ -83,6 +89,11 @@ export interface OpcionesPanel {
   alEtapaCerrada(): void;
   /** false fuera de `consulta`: no se lee ni se escribe el borrador local. */
   usarBorrador?: boolean;
+  /**
+   * Devuelve al texto original los cambios de la unidad. Devuelve null si se pudo, o un
+   * mensaje para mostrar si no. Sin esta opción no se ofrece "Deshacer este cambio".
+   */
+  deshacer?(sugs: Sugerencia[]): string | null;
 }
 
 export interface PanelCambios {
@@ -209,6 +220,8 @@ export function crearPanelCambios(op: OpcionesPanel): PanelCambios {
     v.error.hidden = estado !== 'error';
     v.mensajeError.textContent = e?.error ?? '';
     v.reintentar.disabled = !habilitado;
+    if (v.deshacer) v.deshacer.disabled = !habilitado;
+    if (!habilitado) v.confirmar.hidden = true;
   }
 
   function pintarCabecera(): void {
@@ -341,15 +354,42 @@ export function crearPanelCambios(op: OpcionesPanel): PanelCambios {
     const reintentar = boton('Reintentar', () => void sincronizar(clave), 'secundario');
     const error = el('div', { class: 'error error-motivo', role: 'alert' }, mensajeError, ' ', reintentar);
     error.hidden = true;
+    const errorDeshacer = el('p', { class: 'error error-deshacer', role: 'alert' });
+    errorDeshacer.hidden = true;
+    const confirmar = el(
+      'div',
+      { class: 'confirmar confirmar-deshacer', role: 'alert' },
+      'El texto de este punto volverá a como estaba en el original. ',
+      boton('Confirmar', () => {
+        confirmar.hidden = true;
+        const fallo = habilitado && op.deshacer ? op.deshacer(unidadDe(clave)?.sugs ?? u.sugs) : null;
+        errorDeshacer.hidden = fallo === null;
+        errorDeshacer.textContent = fallo ?? '';
+      }, 'primario'),
+      ' ',
+      boton('Cancelar', () => {
+        confirmar.hidden = true;
+      }, 'secundario'),
+    );
+    confirmar.hidden = true;
+    const deshacer = op.deshacer
+      ? boton('Deshacer este cambio', () => {
+          errorDeshacer.hidden = true;
+          confirmar.hidden = false;
+        }, 'secundario')
+      : null;
+    if (deshacer) deshacer.classList.add('deshacer-cambio');
     const li = el(
       'li',
       { class: 'cambio-unidad', 'data-miembros': String(u.sugs.length) },
       ir,
       el('label', { class: 'etiqueta-motivo' }, campo),
-      el('div', { class: 'linea-estado-motivo' }, falta, estado),
+      el('div', { class: 'linea-estado-motivo' }, falta, estado, deshacer),
+      confirmar,
+      errorDeshacer,
       error,
     );
-    return { li, campo, estado, falta, error, mensajeError, reintentar };
+    return { li, campo, estado, falta, error, mensajeError, reintentar, deshacer, confirmar, errorDeshacer };
   }
 
   function entradaDeServidor(u: Unidad): Entrada {
