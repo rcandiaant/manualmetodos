@@ -27,13 +27,14 @@
  *     mismo trato que `version_obsoleta`.
  */
 import { Editor } from '@tiptap/core';
+import { aplicarSugerencias } from '../../cambios/aplicar';
 import { avisosNoCubiertos } from '../../cambios/estructura';
 import { calcularSugerencias } from '../../cambios/sugerencias';
 import { jsonEstable } from '../../cambios/tokens';
 import { crearBarra, type Barra } from '../../editor/barra';
 import { claveDecoraciones, decoracionesDeCambios, textoVisible } from '../../editor/decoraciones';
 import { boton, cajaAvisosEstructura, el, mensajeDe, resaltar } from '../../editor/ui';
-import type { DocJSON } from '../../tipos';
+import type { DocJSON, Sugerencia } from '../../tipos';
 import { ErrorApi, SIN_CONEXION, type Api } from '../api';
 import { formatearFecha } from '../inicio';
 import type { Vista } from '../router';
@@ -204,6 +205,33 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
     barra?.habilitar(si);
     panelCambios?.habilitar(si);
     comentarios?.habilitar(si);
+  }
+
+  /**
+   * "Deshacer este cambio" (panel): rehace la copia desde la base con todos los cambios
+   * menos los de la unidad. Se comprueba que el resultado tenga exactamente los demás
+   * cambios; si no (p. ej. hay cambios de estructura que no se aplicarían), no toca nada.
+   * Va al historial del editor: Ctrl+Z lo revierte. Devuelve null o el mensaje del fallo.
+   */
+  function deshacerCambio(sugs: Sugerencia[]): string | null {
+    const fallo = 'No se pudo deshacer este cambio automáticamente. Use Ctrl+Z o corrija el texto a mano.';
+    if (!editor || !base || soloLectura || !editor.isEditable) return fallo;
+    try {
+      const copia = editor.state.doc.toJSON() as DocJSON;
+      const actuales = calcularSugerencias(base, copia, autor);
+      if (avisosNoCubiertos(base, copia, actuales).length > 0) return fallo;
+      const quitar = new Set(sugs.map((s) => s.id));
+      const restantes = actuales.filter((s) => !quitar.has(s.id));
+      if (restantes.length === actuales.length) return null; // ya no estaba
+      const nuevo = aplicarSugerencias(base, restantes);
+      const esperado = restantes.map((s) => s.id).sort();
+      const obtenido = calcularSugerencias(base, nuevo, autor).map((s) => s.id).sort();
+      if (jsonEstable(esperado) !== jsonEstable(obtenido)) return fallo;
+      editor.chain().setMeta(PERMITIR_ESPECIAL, true).setContent(nuevo).run(); // emite update: autoguardado
+      return null;
+    } catch {
+      return fallo;
+    }
   }
 
   /** Un motivo espera una sugerencia que aún no está en el servidor: se guarda la copia ya. */
@@ -544,6 +572,7 @@ export function vistaCapitulo(api: Api, u: Usuario, idTexto: string, deps: DepsC
         pedirGuardado,
         alEtapaCerrada,
         usarBorrador: enConsulta && !sinControl,
+        deshacer: deshacerCambio, // el panel lo deshabilita junto con el editor
       });
       panel.append(panelCambios.elemento);
     }
