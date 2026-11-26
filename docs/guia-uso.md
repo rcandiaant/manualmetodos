@@ -29,8 +29,8 @@ La plataforma pasa sola de una etapa a otra según las fechas que fija el admini
 ### Proponer cambios
 
 1. Entre con su correo y su clave. Verá la lista de capítulos con cuántos cambios y comentarios suyos tiene cada uno.
-2. Abra un capítulo y edite el texto directamente, como en un procesador de texto. La plataforma marca cada cambio respecto del texto original: lo agregado, lo borrado y el formato cambiado.
-3. El panel lateral lista sus cambios. Puede deshacer uno con Ctrl+Z en el editor.
+2. Abra un capítulo y edite el texto directamente, como en un procesador de texto. La plataforma marca cada cambio respecto del texto original: lo agregado, lo borrado y el formato cambiado. La barra de formato queda fija arriba mientras recorre el texto.
+3. El panel lateral lista sus cambios. Para deshacer uno, use **Deshacer este cambio** en su entrada y confirme: ese pasaje vuelve al texto original y los demás cambios se mantienen. Si se arrepiente, Ctrl+Z en el editor lo trae de vuelta.
 
 Si mueve, une o separa bloques (por ejemplo, borra el inicio de un ítem y lo pega al anterior), la plataforma lo muestra como **bloque movido**. Si aparece un aviso de "cambios de estructura que no se aplicarán", deshágalo y, si hace falta, borre el bloque y escríbalo de nuevo donde corresponde, o explíquelo en un comentario.
 
