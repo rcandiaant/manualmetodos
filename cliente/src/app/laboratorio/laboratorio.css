@@ -25,11 +25,13 @@
 @media (max-width: 900px) { .disposicion-lab { grid-template-columns: minmax(0, 1fr); } }
 .panel-lab .aviso-estructura { margin: 0 0 10px; }
 
-/* Barra */
-.barra-lab {
-  display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center;
-  position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--fondo);
+/* Barra: queda fija arriba mientras se recorre el texto. El sticky va en el contenedor
+   (.area-barra), cuyo padre es la columna entera del editor; en .barra-lab no tendría recorrido. */
+.area-barra {
+  position: sticky; top: 0; z-index: 2; background: var(--fondo);
+  box-shadow: 0 6px 6px -6px rgba(0, 0, 0, 0.18);
 }
+.barra-lab { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 6px 0; }
 .barra-grupo { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .barra-lab button { padding: 4px 8px; }
 .barra-lab button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -87,6 +89,9 @@
 .tipo-cambio { display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--tenue); }
 .etiqueta-motivo { display: block; }
 .linea-estado-motivo { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; min-height: 1em; }
+.linea-estado-motivo .deshacer-cambio { margin-left: auto; font-size: 0.75rem; padding: 2px 8px; }
+.confirmar-deshacer { font-size: 0.8rem; margin-top: 6px; }
+.error-deshacer { font-size: 0.8rem; margin: 6px 0 0; }
 .falta-motivo { color: var(--lab-b); font-weight: 700; }
 .estado-motivo { color: var(--tenue); }
 .estado-motivo-pendiente, .estado-motivo-esperando, .estado-motivo-guardando, .estado-motivo-error { color: var(--lab-b); font-weight: 600; }
